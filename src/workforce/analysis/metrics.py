@@ -191,6 +191,8 @@ def condition_rows(trials: Sequence[Trial]) -> list[dict[str, Any]]:
             "budget_hit_rate": mean([float(h) for h in budget_hits]),
             "skipped_calls": mean([t["budget"]["skipped_calls"] for t in group]),
             "overruns": sum(1 for t in group if t["budget"]["overrun"] > 0),
+            "untagged_answer_rate": sum(t.get("untagged_answers", 0) for t in group)
+            / max(1, sum(t["calls"] for t in group)),
             "parse_failure_rate": sum(t["parse_failures"] for t in group)
             / max(1, sum(t["calls"] for t in group)),
             "tie_break_rate": mean([float(t["team"]["tie_break"] != "none") for t in group]),

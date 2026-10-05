@@ -67,8 +67,11 @@ print(__MARKER__ + _wf_json.dumps(_wf_results))
 """
 
 
-def extract_code(answer_text: str | None, full_text: str) -> str | None:
-    """Return the program inside the answer (fenced or raw), falling back to the last fence."""
+def extract_code(
+    answer_text: str | None, full_text: str, entry_point: str | None = None
+) -> str | None:
+    """Return the program inside the answer (fenced or raw). Without an answer tag, fall back
+    to the last fenced block that defines ``entry_point``, else the last fenced block."""
     fence = r"```(?:python|py|Python)?[ \t]*\n(.*?)```"
     if answer_text is not None:
         blocks = re.findall(fence, answer_text, flags=re.DOTALL)
@@ -80,6 +83,11 @@ def extract_code(answer_text: str | None, full_text: str) -> str | None:
         if answer_text.strip():
             return answer_text
     blocks = re.findall(fence, full_text, flags=re.DOTALL)
+    if entry_point is not None:
+        defining = [
+            b for b in blocks if re.search(rf"^\s*def\s+{re.escape(entry_point)}\s*\(", b, re.M)
+        ]
+        blocks = defining or blocks
     return blocks[-1] if blocks else None
 
 
@@ -172,7 +180,7 @@ class HumanEvalTask(Task):
         )
 
     def parse_answer(self, answer_text: str | None, full_text: str, item: Item) -> str | None:
-        code = extract_code(answer_text, full_text)
+        code = extract_code(answer_text, full_text, item.data["entry_point"])
         return code if code and code.strip() else None
 
     def display_answer(self, answer: Any | None) -> str:

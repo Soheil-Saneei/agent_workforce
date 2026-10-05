@@ -69,6 +69,7 @@ class Turn:
     confidence: float | None = None
     evidence: list[int] | None = None
     critique: str | None = None
+    answer_tagged: bool = False  # the answer came from an <answer> tag, not a fallback
     allowance: int = 0
     max_output_tokens: int = 0
     input_tokens: int = 0
@@ -232,6 +233,7 @@ class TeamProtocol:
                 turn.confidence = parsed.confidence
                 turn.evidence = list(parsed.evidence) if parsed.evidence is not None else None
                 turn.critique = parsed.critique
+                turn.answer_tagged = parsed.answer_text is not None
                 turn.allowance = slot.allowance
                 turn.max_output_tokens = slot.max_output_tokens
                 turn.input_tokens = response.usage.input_tokens
@@ -367,6 +369,7 @@ class TeamProtocol:
             "cost_usd": sum(t.cost_usd or 0.0 for t in calls),
             "calls": len(calls),
             "parse_failures": sum(1 for t in calls if t.answer is None),
+            "untagged_answers": sum(1 for t in calls if not t.answer_tagged),
             "latency": {
                 "critical_path_s": sum(
                     max((t.latency_s for t in phase if not t.skipped), default=0.0)

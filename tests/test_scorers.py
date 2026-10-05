@@ -157,3 +157,6 @@ def test_probe_and_code_extraction():
     assert extract_code(fenced, "") == "def f():\n    return 1\n"
     assert extract_code(None, "text ```python\nx = 1\n``` more") == "x = 1\n"
     assert extract_code("```python\ndef f(): return 2", "") == "def f(): return 2"
+    untagged = "```python\ndef f():\n    return 1\n```\nCheck:\n```python\nassert f() == 1\n```"
+    assert extract_code(None, untagged, "f") == "def f():\n    return 1\n"
+    assert extract_code(None, untagged) == "assert f() == 1\n"
