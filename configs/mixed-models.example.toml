@@ -1,0 +1,43 @@
+# Model assignment as its own factor, crossed with procedural diversity so the two are never
+# confounded: every diversity level runs with both a homogeneous and a mixed-model team, and
+# within mixed teams the procedure-to-model pairing rotates across items (counterbalancing).
+
+[experiment]
+name = "mixed-models"
+seed = 20261004
+replications = 1
+
+[benchmarks.musr]
+items = 30
+budget_tokens = 80000
+
+[factors]
+team_size = [3]
+diversity = ["identical", "moderate"]
+communication = ["independent", "horizontal-2r"]
+model_assignment = ["homogeneous", "mixed"]
+
+[models.luna]
+provider = "openai"
+model = "gpt-6-luna"
+params = { reasoning_effort = "none" }
+
+[models.mini]
+provider = "openai"
+model = "gpt-4.1-mini"
+
+# Any OpenAI-compatible endpoint works the same way, for example a local Ollama or vLLM server:
+# [models.local]
+# provider = "openai_compatible"
+# model = "llama3.1:8b"
+# base_url = "http://localhost:11434/v1"
+# price = { input = 0.0, output = 0.0 }
+
+[model_assignments.homogeneous]
+models = ["luna"]
+
+[model_assignments.mixed]
+models = ["luna", "mini"]  # agents cycle through this list; pairing rotates across items
+
+[run]
+max_spend_usd = 5.0

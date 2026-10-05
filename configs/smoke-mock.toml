@@ -1,0 +1,24 @@
+# Offline end-to-end check: synthetic arithmetic items and the deterministic mock provider.
+# uv run workforce run configs/smoke-mock.toml
+
+[experiment]
+name = "smoke-mock"
+seed = 7
+replications = 2
+
+[benchmarks.toy_arithmetic]
+items = 6
+budget_tokens = 12000
+
+[factors]
+team_size = [1, 3, 5]
+diversity = ["identical", "moderate"]
+communication = ["independent", "horizontal-2r"]
+
+[generation]
+temperature = 0.7
+min_output_tokens = 40
+
+[models.base]
+provider = "mock"
+model = "mock-base"

@@ -1,0 +1,51 @@
+# The design doc's "first experiment I would actually run", at full scale:
+# N = 1, 3, 5 x identical vs moderate x independent vote vs two-round discussion,
+# MuSiQue + MuSR + HumanEval, 3 stochastic replications, one strong base model.
+#
+#   uv run workforce estimate-cost --config configs/first-experiment.toml --from-run runs/<pilot>
+#   uv run workforce run configs/first-experiment.toml --env-file /path/to/.env
+
+[experiment]
+name = "first-experiment"
+seed = 20261004
+replications = 3
+
+# Item counts: a 600-item random sample of MuSiQue-Answerable dev, all 756 MuSR items, all 164
+# HumanEval problems.
+[benchmarks.musique]
+items = 600
+budget_tokens = 100000
+
+[benchmarks.musr]
+budget_tokens = 80000
+
+[benchmarks.humaneval]
+budget_tokens = 65000
+
+[factors]
+team_size = [1, 3, 5]
+diversity = ["identical", "moderate"]
+communication = ["independent", "horizontal-2r"]
+model_assignment = ["homogeneous"]
+
+[generation]
+temperature = 0.7
+max_output_tokens_per_call = 8192
+min_output_tokens = 200
+
+[budget]
+count = "total"
+disclose_allowance = true
+
+[models.base]
+provider = "openai"
+model = "gpt-6-luna"
+params = { reasoning_effort = "none" }
+concurrency = 16
+
+[model_assignments.homogeneous]
+models = ["base"]
+
+[run]
+trial_concurrency = 12
+max_spend_usd = 250.0
