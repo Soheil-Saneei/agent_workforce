@@ -596,6 +596,7 @@ harness calls the synchronous API).
   violations. These rejections are retried, and a trial that still fails is left
   unrecorded for `resume`, never scored as wrong.
 - **Scale.** A run is one process with asyncio concurrency. `calls.jsonl` stores full
-  prompts per call (about 15 KB each), roughly 2-3 GB for the full first experiment.
+  prompts per call (11 KB each in the pilot): about 3.5 GB of call logs plus 0.8 GB of
+  trial records for the full first experiment.
 - **Static prices.** The built-in price table is dated 2026-10-04. Override it with `price`
   in a model spec.
