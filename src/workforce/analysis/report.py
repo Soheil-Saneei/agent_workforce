@@ -7,7 +7,12 @@ import io
 from collections.abc import Sequence
 from typing import Any
 
-from workforce.analysis.metrics import condition_rows, gain_rows, procedure_rows
+from workforce.analysis.metrics import (
+    benchmark_metric_rows,
+    condition_rows,
+    gain_rows,
+    procedure_rows,
+)
 from workforce.store import RunStore
 
 
@@ -171,6 +176,20 @@ def procedure_table(rows: Sequence[dict[str, Any]]) -> str:
     )
 
 
+def metric_tables(rows: Sequence[dict[str, Any]]) -> str:
+    tables = []
+    for bench in sorted({r["benchmark"] for r in rows}):
+        group = [r for r in rows if r["benchmark"] == bench]
+        names = sorted({k for r in group for k in r} - {"benchmark", "condition"})
+        tables.append(
+            _table(
+                ["Benchmark", "Condition", *names],
+                [[bench, r["condition"], *(_f(r.get(n)) for n in names)] for r in group],
+            )
+        )
+    return "\n\n".join(tables)
+
+
 def summarize(store: RunStore) -> str:
     trials = store.trials()
     if not trials:
@@ -201,6 +220,8 @@ def summarize(store: RunStore) -> str:
         gain_table(gain_rows(trials)),
         "## Team process and diversity validation",
         process_table(rows),
+        "## Benchmark metrics of the team answer",
+        metric_tables(benchmark_metric_rows(trials)),
         "## Procedures (initial answers)",
         procedure_table(procedure_rows(trials)),
     ]

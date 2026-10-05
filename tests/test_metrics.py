@@ -3,6 +3,7 @@
 import pytest
 
 from workforce.analysis.metrics import (
+    benchmark_metric_rows,
     condition_rows,
     error_correlation,
     gain_rows,
@@ -201,3 +202,11 @@ def test_stats_helpers():
     assert phi([(True, False), (False, True)]) == pytest.approx(-1.0)
     assert phi([(True, True)]) is None
     assert jaccard([1, 2], [2, 3]) == pytest.approx(1 / 3)
+
+
+def test_benchmark_metric_means():
+    a = trial("1", 1, "independent", ["ok"], ["ok"], "ok")
+    b = trial("2", 1, "independent", ["x"], ["x"], "x")
+    a["team"]["metrics"], b["team"]["metrics"] = {"em": 1.0, "f1": 1.0}, {"em": 0.0, "f1": 0.5}
+    (row,) = benchmark_metric_rows([a, b])
+    assert row["em"] == 0.5 and row["f1"] == 0.75

@@ -42,6 +42,9 @@ def test_musique_scoring_uses_aliases_and_support():
     assert task.parse_answer(None, "...\nFinal answer: Steve", MUSIQUE_ITEM) == "Steve"
     assert task.answer_key("The Miquette  Giraudy", MUSIQUE_ITEM) == "miquette giraudy"
     assert "[P2] T1" in task.problem_prompt(MUSIQUE_ITEM)
+    assert "cannot be determined" not in task.problem_prompt(MUSIQUE_ITEM)
+    strict = create_task("musique", assert_answerable=True)
+    assert "cannot be determined" in strict.problem_prompt(MUSIQUE_ITEM)
 
 
 # MuSR --------------------------------------------------------------------------------------
@@ -63,6 +66,8 @@ def test_musr_parsing_and_accuracy():
     assert task.parse_answer("1", "", MUSR_ITEM) == 1
     assert task.parse_answer("(2) Ana", "", MUSR_ITEM) == 2
     assert task.parse_answer("ana", "", MUSR_ITEM) == 2
+    assert task.parse_answer("choice 2", "", MUSR_ITEM) == 2
+    assert task.parse_answer("Option #1", "", MUSR_ITEM) == 1
     assert task.parse_answer("7", "", MUSR_ITEM) is None
     assert task.parse_answer(None, "so the answer is 1", MUSR_ITEM) == 1
     assert asyncio.run(task.score(MUSR_ITEM, 1)).correct

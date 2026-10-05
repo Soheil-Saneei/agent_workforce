@@ -94,7 +94,8 @@ class MuSRTask(Task):
             answer_text = match[-1] if match else None
         if not answer_text:
             return None
-        number = re.match(r"\s*\(?(\d+)\)?", answer_text)
+        # "2", "(2) Ana", and "choice 2" (models sometimes echo the placeholder's wording).
+        number = re.match(r"\s*(?:(?:choice|option)\s*#?\s*)?\(?(\d+)\)?", answer_text, re.I)
         if number and 1 <= int(number.group(1)) <= len(choices):
             return int(number.group(1))
         normalized = normalize_answer(answer_text)

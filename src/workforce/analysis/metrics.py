@@ -195,7 +195,9 @@ def condition_rows(trials: Sequence[Trial]) -> list[dict[str, Any]]:
             / max(1, sum(t["calls"] for t in group)),
             "parse_failure_rate": sum(t["parse_failures"] for t in group)
             / max(1, sum(t["calls"] for t in group)),
-            "tie_break_rate": mean([float(t["team"]["tie_break"] != "none") for t in group]),
+            "tie_break_rate": mean(
+                [float(t["team"]["tie_break"] in ("confidence", "random")) for t in group]
+            ),
         }
         for name in (
             "disagreement_pre",
@@ -289,6 +291,22 @@ def gain_rows(trials: Sequence[Trial]) -> list[dict[str, Any]]:
                     team, per_item(group, initial_vote_correct)
                 )
             rows.append(row)
+    return rows
+
+
+def benchmark_metric_rows(trials: Sequence[Trial]) -> list[dict[str, Any]]:
+    """Mean of every benchmark-specific metric of the team answer (for example MuSiQue answer
+    F1 and supporting-paragraph F1 alongside EM)."""
+    rows = []
+    for (benchmark, cid), group in group_trials(trials).items():
+        names = sorted({k for t in group for k in t["team"]["metrics"]})
+        rows.append(
+            {
+                "benchmark": benchmark,
+                "condition": cid,
+                **{n: mean([t["team"]["metrics"].get(n, 0.0) for t in group]) for n in names},
+            }
+        )
     return rows
 
 
