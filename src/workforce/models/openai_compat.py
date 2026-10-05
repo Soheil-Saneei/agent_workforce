@@ -26,6 +26,10 @@ from workforce.models.base import (
 from workforce.models.registry import register_provider
 
 _QUOTA_CODES = {"insufficient_quota", "credit_balance_exhausted", "billing_hard_limit_reached"}
+# OpenAI's prompt-safety screen occasionally rejects benign prompts with HTTP 400
+# "invalid_prompt"; in the pilot 4 of ~4,000 HumanEval calls were flagged and all passed on a
+# second attempt, so the flag is retried within the normal retry limit.
+_FLAGGED_CODES = {"invalid_prompt"}
 _DURATION = re.compile(r"(\d+(?:\.\d+)?)(ms|s|m|h)")
 
 
@@ -153,6 +157,11 @@ class OpenAICompatibleProvider(Provider):
         code = error.get("code") or error.get("type")
         if status == 429 and code in _QUOTA_CODES:
             raise QuotaExhaustedError(message)
+        flagged = code in _FLAGGED_CODES or str(error.get("message", "")).startswith(
+            "Invalid prompt:"
+        )
+        if status == 400 and flagged:
+            raise RetryableError(message)
         if status in (408, 409, 429) or status >= 500:
             retry_after = parse_reset_duration(response.headers.get("retry-after"))
             if retry_after is None:

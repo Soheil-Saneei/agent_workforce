@@ -110,6 +110,21 @@ def test_rate_limits_and_server_errors_are_retried_with_backoff(monkeypatch):
     assert len(sleeps) == 2
 
 
+def test_spurious_prompt_flags_are_retried(monkeypatch):
+    flagged = {"error": {"code": "invalid_prompt", "message": "Invalid prompt: flagged"}}
+    by_message = {"error": {"code": None, "message": "Invalid prompt: your prompt was flagged"}}
+    responses = iter(
+        [
+            httpx.Response(400, json=flagged),
+            httpx.Response(400, json=by_message),
+            httpx.Response(200, json=ok_body()),
+        ]
+    )
+    p, sleeps = provider(lambda r: next(responses), monkeypatch)
+    assert run(p.complete(REQUEST)).attempts == 3
+    assert len(sleeps) == 2
+
+
 def test_timeouts_are_retried_then_give_up(monkeypatch):
     def handler(request):
         raise httpx.ReadTimeout("slow", request=request)
