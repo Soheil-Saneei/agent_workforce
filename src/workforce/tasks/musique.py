@@ -68,9 +68,17 @@ class MuSiQueTask(Task):
         paragraphs = "\n\n".join(
             f"[P{i + 1}] {p['title']}\n{p['text']}" for i, p in enumerate(item.data["paragraphs"])
         )
+        # Opt-in (benchmark option ``assert_answerable = true``): every MuSiQue-Answerable
+        # question is supported by the paragraphs. Off by default so earlier runs replay.
+        answerable = (
+            " Every question can be answered from these paragraphs, so always give your best "
+            "answer rather than saying it cannot be determined."
+            if self.options.get("assert_answerable")
+            else ""
+        )
         return (
             "Answer the question using only the paragraphs below. The answer requires combining "
-            "information from several paragraphs.\n\n"
+            f"information from several paragraphs.{answerable}\n\n"
             f"Paragraphs:\n\n{paragraphs}\n\nQuestion: {item.data['question']}"
         )
 
