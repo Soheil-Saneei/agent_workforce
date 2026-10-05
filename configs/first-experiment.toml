@@ -48,4 +48,4 @@ models = ["base"]
 
 [run]
 trial_concurrency = 12
-max_spend_usd = 250.0
+max_spend_usd = 150.0
