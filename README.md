@@ -10,6 +10,20 @@ LiveCodeBench as harder candidates), logs every model call, resumes interrupted 
 paying twice, and regenerates all results tables from the logs. A solo-iteration mode measures
 how one agent's accuracy grows with the tokens it spends alone.
 
+**Results so far**
+
+- **[Solo-scaling calibration: plain-language results](docs/solo-calibration-results.md).**
+  When one agent keeps checking its own work, AIME and LiveCodeBench (hard problems) gain about
+  +0.17 to +0.19 accuracy and then level off (AIME at about 16k tokens, LiveCodeBench at about
+  32k). MuSiQue gets slightly worse as the agent talks itself into "not stated" answers, MuSR
+  shows no reliable gain, and HumanEval is at the ceiling. Keep AIME and LiveCodeBench for the
+  collaboration-onset study. Full tables: [Solo-scaling calibration](#solo-scaling-calibration).
+- **[Pilot](#pilot)** of the first experiment (teams of 1, 3 and 5 agents, 20 items per
+  benchmark): validates the pipeline and sizes the full experiment
+  ([cost estimate](#cost-estimate-for-the-full-first-experiment)). Its CIs are too wide for
+  findings.
+
+- [How the code fits together](#how-the-code-fits-together)
 - [Setup](#setup)
 - [Running experiments](#running-experiments)
 - [Defining an experiment](#defining-an-experiment)
@@ -20,7 +34,82 @@ how one agent's accuracy grows with the tokens it spends alone.
 - [Pilot](#pilot)
 - [Cost estimate for the full first experiment](#cost-estimate-for-the-full-first-experiment)
 - [Solo-scaling calibration](#solo-scaling-calibration)
+- [Data and licenses](#data-and-licenses)
 - [Known limitations](#known-limitations)
+
+## How the code fits together
+
+```mermaid
+flowchart LR
+    config["configs/*.toml<br/>experiment definition"] --> design["design.py<br/>validate, expand the grid"]
+    cli["cli.py<br/>workforce command"] --> design
+    cli --> runner["runner.py<br/>runs every trial,<br/>resumable"]
+    runner --> protocol["protocol/team.py<br/>or protocol/solo.py<br/>one trial"]
+    runner --> tasks["tasks/<br/>items, prompts, scoring"]
+    protocol --> tasks
+    protocol --> gateway["gateway.py<br/>cache, spend cap, logging"]
+    gateway --> models["models/<br/>OpenAI, mock, others"]
+    gateway --> store[("store.py<br/>run directory")]
+    runner --> store
+    store --> analysis["analysis/<br/>summary.md, CSVs, plot"]
+```
+
+**Life of a run.** `workforce run config.toml` loads the config (`design.py`) and the API key
+(`env.py`), creates a run directory (`store.py`) and hands it to `runner.py`. The runner loads
+each benchmark's items once (`tasks/`, downloaded and checksummed by `tasks/download.py`), saves
+them in the run, and builds one trial per benchmark x condition x item x replication. Each trial
+runs a protocol: `protocol/team.py` for teams (initial answers, anonymous reveal, critique
+rounds, vote) or `protocol/solo.py` for one agent checking its own work. Protocols build prompts
+(`protocol/prompts.py`), keep the token budget (`protocol/budget.py`) and send every model call
+through `gateway.py`. The gateway answers from the run's call log when the same call was already
+made, otherwise enforces the spend cap, calls the provider (`models/`) and appends the call to
+the log. The task parses and scores each answer, and the runner appends one record per finished
+trial. `analysis/` turns the trial records into `summary.md` and CSVs; nothing in the analysis
+needs the network. Because every call is logged and keyed by its exact request, `resume` and
+`summarize --rebuild` replay a run without paying for any call twice.
+
+**Files.**
+
+| Path | What it does |
+|---|---|
+| `README.md` | This file: design, usage, results. |
+| `multi-agent-experimental-design.md` | The study design the harness implements. |
+| `docs/solo-calibration-results.md`, `docs/solo-calibration.png` | Solo-scaling calibration write-up and figure. |
+| `configs/*.toml` | Experiment definitions: `pilot`, `first-experiment`, `full-factorial`, `mixed-models.example`, `solo-calibration` (+ `-64k` extension), `smoke-mock` (offline). |
+| `pyproject.toml`, `uv.lock`, `.python-version` | Package definition (the `workforce` command), pinned dependencies, Python version. |
+| `AGENTS.md` (`CLAUDE.md` links to it) | Short notes for coding agents working on this repository. |
+| `.gitignore` | Keeps `runs/`, `data/` and `.env` out of git. |
+| **`src/workforce/`** | |
+| `cli.py` | The `workforce` command: `run`, `resume`, `summarize`, `estimate-cost`, `grid`, `fetch-data`, `plot-solo`. |
+| `design.py` | Parses and validates a config; expands the factorial grid into conditions; assigns procedures and models to agents. |
+| `env.py` | Loads API keys from an env file without printing them. |
+| `runner.py` | Builds the trial list, skips finished trials, runs the rest concurrently under the spend cap; offline rebuild. |
+| `gateway.py` | The only path to a model: call cache, spend guard, per-model concurrency, call log. |
+| `store.py` | The run directory: manifest, items, append-only call, trial, error and event logs. |
+| `cost.py` | Hard cost bound from a config, and cost projection from a finished run. |
+| `protocol/team.py` | One team trial: simultaneous initial answers, anonymized reveal, critique rounds, vote. |
+| `protocol/solo.py` | One agent's solo trajectory: self-check steps, token checkpoints, resumable state. |
+| `protocol/budget.py` | Per-problem token budget: per-phase allowances and reservations. |
+| `protocol/prompts.py` | Every prompt the agents see. |
+| `protocol/procedures.py` | Problem-solving procedures (the diversity manipulation) and diversity levels. |
+| `protocol/parsing.py` | Reads `<answer>`, `<confidence>`, `<evidence>`, `<critique>` from responses. |
+| `protocol/voting.py` | Anonymous majority vote with a confidence tie-break. |
+| `protocol/mock_agent.py` | Fake agent behind the mock provider, for offline runs and tests. |
+| `models/base.py` | Provider interface and request, response and usage types; retries and backoff. |
+| `models/openai_compat.py`, `models/openai.py` | Adapter for any OpenAI-compatible server, and the OpenAI API. |
+| `models/mock.py` | Deterministic offline provider. |
+| `models/registry.py`, `models/pricing.py`, `models/tokens.py` | Provider lookup by name, price table, pre-call token counting. |
+| `tasks/base.py`, `tasks/registry.py` | Benchmark interface (load, prompt, parse, score, answer equivalence) and lookup by name. |
+| `tasks/musique.py`, `musr.py`, `humaneval.py`, `aime.py`, `livecodebench.py` | The benchmarks. |
+| `tasks/toy.py` | Synthetic arithmetic task for offline runs and tests. |
+| `tasks/download.py` | Pinned, checksummed dataset downloads into the data directory. |
+| `tasks/sandbox.py` | Runs generated code in a resource-limited subprocess (HumanEval, LiveCodeBench). |
+| `tasks/text_metrics.py` | Answer normalization, exact match and F1. |
+| `analysis/metrics.py`, `analysis/solo.py` | Outcome, gain, team-process and solo-checkpoint metrics from trial records. |
+| `analysis/report.py` | Writes `summary.md`, `conditions.csv`, `solo_checkpoints.csv`. |
+| `analysis/stats.py`, `analysis/similarity.py` | Bootstrap CIs and other statistics; TF-IDF text similarity. |
+| `analysis/plot.py` | Accuracy-vs-tokens figure for solo runs. |
+| **`tests/`** | Offline test suite: mock provider and the toy task, no downloads or keys. `conftest.py` and `helpers.py` hold shared fixtures. |
 
 ## Setup
 
@@ -52,6 +141,20 @@ dataset viewer and pinned by checksum. LiveCodeBench is release v6 (`test6.jsonl
 
 ## Running experiments
 
+**Quick start**, from a fresh clone:
+
+```sh
+uv sync                                          # 1. install
+uv run pytest                                    # 2. offline checks (no key, no downloads)
+uv run workforce run configs/smoke-mock.toml     # 3. whole pipeline offline, fake model
+echo 'OPENAI_API_KEY=sk-...' > .env              # 4. key for live runs (.env is gitignored)
+uv run workforce run configs/solo-calibration.toml --items 2 --max-spend 0.5   # 5. tiny live run
+cat runs/solo-calibration-*/summary.md           # 6. results tables
+```
+
+Step 5 downloads the benchmarks on first use (about 170 MB, mostly LiveCodeBench) and costs a
+few cents; drop `--items` and `--max-spend` for the full run (about $2). Every command:
+
 ```sh
 uv run workforce grid configs/pilot.toml                    # print the expanded grid
 uv run workforce run configs/smoke-mock.toml                # offline mock run (toy task)
@@ -80,6 +183,7 @@ Each run lives in a gitignored `runs/<name>-<timestamp>/` directory:
 | `trials.jsonl` | one record per (benchmark, condition, item, replication): all turns, votes, scores, budget ledger |
 | `errors.jsonl`, `events.jsonl` | failed calls and run lifecycle |
 | `summary.md`, `conditions.csv` | derived tables, regenerated by `summarize` |
+| `solo_checkpoints.csv` | per-checkpoint solo results (solo runs only) |
 
 **Resume without re-paying.** Each call has a key: a hash of the model identity, the full
 request (messages, seed, temperature, max tokens) and its place in the experiment. A resumed
@@ -699,8 +803,8 @@ within 0.02 of the best one.
 - **LiveCodeBench: keep, weighted to hard problems.** It rises through 32k (16k to 32k +0.04
   [+0.01, +0.08]) and is flat after (32k to 64k +0.01 [-0.01, +0.03]). Revisions fix 29 and break
   5. Hard problems carry the range: 0.24 at 2k to 0.40 at 32k, +0.16 [+0.09, +0.22] over the
-  first answer, with LeetCode hard going from 0.33 at 2k to 0.73 at 32k. Medium problems saturate by 4k
-  (0.80-0.82).
+  first answer, with LeetCode hard going from 0.33 at 2k to 0.73 at 32k. Medium problems
+  saturate by 4k (0.80-0.82).
 - **MuSiQue: drop.** After the first answer, accuracy is flat, then declines (-0.04 by 32k).
   Extra solo work mostly turns answers into abstentions: of the 7 trajectories that lost a
   correct first answer, 6 ended on "Not stated" or "Cannot be determined". Abstentions grow from
@@ -748,6 +852,16 @@ extension did, so that every onset point reuses the same solo prefix from the ca
 uv run workforce run configs/solo-calibration.toml --env-file /path/to/.env
 uv run workforce plot-solo runs/solo-calibration-... runs/solo-64k --out solo-calibration.png
 ```
+
+## Data and licenses
+
+No dataset is in this repository. Each benchmark is downloaded at run time from its source,
+pinned by revision and SHA-256, into `$WORKFORCE_DATA_DIR`, under the source's own license:
+MuSiQue (CC BY 4.0), MuSR (CC BY 4.0), HumanEval (MIT), AIME via MathArena (CC BY-NC-SA 4.0,
+non-commercial) and LiveCodeBench (Creative Commons per its dataset card, version unstated).
+A run directory copies the items it used, so share run directories under the same terms. Run
+logs from the pilot and the calibration (about 450 MB) are not in git; every result here can
+be regenerated from the configs.
 
 ## Known limitations
 

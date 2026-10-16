@@ -187,4 +187,6 @@ them the same way.
 - Full tables and method: the README's "Solo-scaling calibration" section
 - Configs: `configs/solo-calibration.toml` (1k-32k) and `configs/solo-calibration-64k.toml`
   (64k extension)
-- Run logs: `runs/calibration/` in the main checkout (not in git)
+- Run logs: not in the repository (about 450 MB). To reproduce:
+  `uv run workforce run configs/solo-calibration.toml --env-file .env` (about $2), then
+  `uv run workforce plot-solo runs/solo-calibration-<time> --out solo-calibration.png`.
