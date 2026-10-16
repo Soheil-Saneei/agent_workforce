@@ -8,6 +8,8 @@
 # One agent answers, then checks and revises its own work until it has spent the problem's
 # budget (32k tokens, input + output); its current answer is scored at every checkpoint, so one
 # trajectory per item and replication yields the whole curve (see protocol/solo.py).
+# A trajectory cost about $0.002 in the smoke runs, so ~100 items per benchmark (all 60 AIME
+# problems) x 2 replications is about $2 and narrows the CIs the keep/drop verdicts rest on.
 
 [experiment]
 name = "solo-calibration"
@@ -16,22 +18,22 @@ replications = 2
 description = "Solo accuracy vs tokens at 1k-32k on five benchmarks, gpt-6-luna effort none."
 
 [benchmarks.musique]
-items = 50
+items = 100
 # Every MuSiQue-Answerable question has an answer; say so, against the abstention drift the
 # pilot saw under self-revision.
 options = { assert_answerable = true }
 
 [benchmarks.musr]
-items = 51  # 17 per domain
+items = 99  # 33 per domain
 
 [benchmarks.humaneval]
-items = 50
+items = 100
 
 [benchmarks.aime]
 items = 60  # all of AIME 2025 and 2026
 
 [benchmarks.livecodebench]
-items = 50
+items = 100  # of the 132 medium and hard problems
 options = { difficulties = ["medium", "hard"] }
 
 [factors]
