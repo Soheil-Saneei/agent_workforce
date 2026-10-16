@@ -2,6 +2,8 @@
 name = "workforce"
 version = "0.1.0"
 description = "Experiment harness for teams of LLM agents under a fixed total token budget"
+license = "MIT"
+license-files = ["LICENSE"]
 authors = [
     { name = "Soheil-Saneei", email = "soheilsaneei@gmail.com" }
 ]

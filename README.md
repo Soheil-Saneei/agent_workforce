@@ -77,6 +77,7 @@ needs the network. Because every call is logged and keyed by its exact request, 
 | `docs/solo-calibration-results.md`, `docs/solo-calibration.png` | Solo-scaling calibration write-up and figure. |
 | `configs/*.toml` | Experiment definitions: `pilot`, `first-experiment`, `full-factorial`, `mixed-models.example`, `solo-calibration` (+ `-64k` extension), `smoke-mock` (offline). |
 | `pyproject.toml`, `uv.lock`, `.python-version` | Package definition (the `workforce` command), pinned dependencies, Python version. |
+| `LICENSE` | MIT License for the code (datasets keep their own licenses). |
 | `AGENTS.md` (`CLAUDE.md` links to it) | Short notes for coding agents working on this repository. |
 | `.gitignore` | Keeps `runs/`, `data/` and `.env` out of git. |
 | **`src/workforce/`** | |
