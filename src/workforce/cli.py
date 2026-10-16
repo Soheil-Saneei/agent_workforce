@@ -1,4 +1,4 @@
-"""Command line: run, resume, summarize, estimate-cost, grid, fetch-data."""
+"""Command line: run, resume, summarize, estimate-cost, grid, fetch-data, plot-solo."""
 
 from __future__ import annotations
 
@@ -99,9 +99,11 @@ def cmd_estimate_cost(args: argparse.Namespace) -> int:
         print()
     print("## Hard upper bound from the token budgets\n")
     for row in bound["rows"]:
+        overshoot = row["max_tokens"] - row["trials"] * row["budget_tokens"]
         print(
-            f"- {row['benchmark']}: {row['trials']:,} trials x {row['budget_tokens']:,} tokens "
-            f"<= ${row['max_usd']:,.2f}"
+            f"- {row['benchmark']}: {row['trials']:,} trials x {row['budget_tokens']:,} tokens"
+            + (f" + {overshoot:,} solo overshoot" if overshoot else "")
+            + f" <= ${row['max_usd']:,.2f}"
         )
     print(f"- total <= ${bound['total_usd']:,.2f} (every token priced as output)")
     return 0
@@ -117,6 +119,19 @@ def cmd_grid(args: argparse.Namespace) -> int:
         print(f"  (skipped, degenerate for one agent) {skipped.id}")
     for name, bench in config.benchmarks.items():
         print(f"  benchmark {name}: items={bench.items or 'all'}, budget={bench.budget_tokens:,}")
+    return 0
+
+
+def cmd_plot_solo(args: argparse.Namespace) -> int:
+    from workforce.analysis.plot import plot_solo_curves
+
+    trials = [t for run in args.run_dirs for t in RunStore.open(Path(run)).trials()]
+    try:
+        print(plot_solo_curves(trials, Path(args.out)))
+    except ModuleNotFoundError as exc:
+        if exc.name != "matplotlib":
+            raise
+        raise SystemExit("plot-solo needs matplotlib: uv sync --extra plot") from None
     return 0
 
 
@@ -163,6 +178,11 @@ def build_parser() -> argparse.ArgumentParser:
     grid = sub.add_parser("grid", help="print the expanded factorial grid")
     grid.add_argument("config")
     grid.set_defaults(func=cmd_grid)
+
+    plot = sub.add_parser("plot-solo", help="plot solo accuracy vs tokens (PNG)")
+    plot.add_argument("run_dirs", nargs="+", help="runs whose solo trials to plot together")
+    plot.add_argument("--out", required=True, help="output .png path")
+    plot.set_defaults(func=cmd_plot_solo)
 
     fetch = sub.add_parser("fetch-data", help="download and verify benchmark files")
     fetch.add_argument("benchmarks", nargs="+")

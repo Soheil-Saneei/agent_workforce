@@ -84,3 +84,50 @@ def discussion_message(
     if allowance is not None:
         parts.append(allowance_line(allowance))
     return Message("user", "\n\n".join(parts))
+
+
+# Solo iteration ----------------------------------------------------------------------------
+# A solo step's prompt depends only on the step index, never on the token horizon, so a
+# trajectory's requests are the same however long it is allowed to run (see protocol/solo.py).
+SOLO_CHECK_HEADING = "Self-check {step}."
+SOLO_CHECK_METHODS = (
+    "Solve the problem again from the beginning without relying on your earlier work, by a "
+    "different route where possible (a different method, order of steps or reading of the key "
+    "facts). Then compare the result with your latest answer and, if they differ, determine "
+    "which one is correct.",
+    "Audit your latest solution step by step: check every fact you used against the problem "
+    "statement, redo every calculation, and confirm that each step follows from the previous "
+    "ones. For a program, trace it by hand on the examples and on edge cases.",
+    "Identify the most plausible alternative answer, or the most likely way your latest answer "
+    "could be wrong, and test it seriously against the problem. Keep whichever answer holds up.",
+)
+
+
+def solo_initial_message(task: Task, item: Item) -> Message:
+    parts = [
+        task.problem_prompt(item),
+        "Work through the problem following your procedure, writing out your reasoning in full "
+        "before you answer.",
+        task.answer_format(),
+        CONFIDENCE_INSTRUCTION,
+    ]
+    return Message("user", "\n\n".join(parts))
+
+
+def solo_check_message(task: Task, step: int) -> Message:
+    """The self-check after ``step`` - 1 earlier steps; verification methods rotate by step."""
+    method = SOLO_CHECK_METHODS[(step - 1) % len(SOLO_CHECK_METHODS)]
+    parts = [
+        f"{SOLO_CHECK_HEADING.format(step=step)} Check your latest solution above with this "
+        f"method:\n{method}",
+        "Change your answer only if the check reveals a concrete mistake; if it confirms your "
+        "answer, keep it. The problem has a definite correct answer and a response without one "
+        "is scored as wrong, so always commit to your single best answer, even if some doubt "
+        "remains.",
+        "Write your check inside <critique>...</critique>, showing your work. Then give your "
+        "answer, which may keep or change your previous answer, in exactly the same format as "
+        "before:",
+        task.answer_format(),
+        CONFIDENCE_INSTRUCTION,
+    ]
+    return Message("user", "\n\n".join(parts))

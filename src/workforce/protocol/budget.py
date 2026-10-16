@@ -30,6 +30,16 @@ from dataclasses import asdict, dataclass, field
 from typing import Any
 
 
+def padded_input_estimate(raw_count: int, margin: float) -> int:
+    """Pre-call input estimate used for budget decisions: the tokenizer count plus a margin."""
+    return math.ceil(raw_count * (1 + margin)) + 16
+
+
+def charged_tokens(count: str, input_tokens: int, output_tokens: int) -> int:
+    """Tokens a call costs against a budget: input + output (``count = "total"``) or output."""
+    return output_tokens + (input_tokens if count == "total" else 0)
+
+
 @dataclass
 class PhasePlan:
     phase: int
@@ -84,7 +94,7 @@ class BudgetLedger:
         return max(0, self.used - self.total)
 
     def estimate_input(self, raw_count: int) -> int:
-        return math.ceil(raw_count * (1 + self.input_margin)) + 16
+        return padded_input_estimate(raw_count, self.input_margin)
 
     def plan_phase(self, phase: int, base_input: int, overhead: int) -> PhasePlan:
         rem = self.remaining - self.reserved
@@ -143,7 +153,7 @@ class BudgetLedger:
         self.reserved -= self._charge(slot.input_estimate, slot.max_output_tokens)
 
     def _charge(self, input_tokens: int, output_tokens: int) -> int:
-        return output_tokens + (input_tokens if self.count == "total" else 0)
+        return charged_tokens(self.count, input_tokens, output_tokens)
 
     def to_dict(self) -> dict[str, Any]:
         return {

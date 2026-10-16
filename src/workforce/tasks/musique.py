@@ -34,6 +34,16 @@ DEV_FILE = RemoteFile(
 )
 
 
+# Non-answers ("not stated in the paragraphs", "cannot be determined", "unknown"), matched on
+# the normalized answer. Every MuSiQue-Answerable question has an answer, so these score 0.
+_ABSTENTION = re.compile(
+    r"^(?:(?:not (?:stated|specified|provided|mentioned|given|found|known|clear|available"
+    r"|determinable|determined|uniquely determined|enough information)"
+    r"|can ?not be determined|cant be determined|undeterminable|undetermined|indeterminate"
+    r"|unknown|unclear|unanswerable|insufficient|no answer|none specified)\b|(?:none|na)$)"
+)
+
+
 @register_task("musique")
 class MuSiQueTask(Task):
     name = "musique"
@@ -102,6 +112,9 @@ class MuSiQueTask(Task):
 
     def answer_key(self, answer: Any, item: Item) -> Hashable:
         return normalize_answer(str(answer))
+
+    def is_abstention(self, answer: Any | None) -> bool:
+        return answer is None or bool(_ABSTENTION.match(normalize_answer(str(answer))))
 
     def evidence_ids(self, evidence: Sequence[int] | None) -> list[int] | None:
         """Displayed paragraph numbers are 1-based; dataset indices are 0-based."""

@@ -3,7 +3,8 @@
 It answers in the protocol's tagged format, picks plausible answers for each benchmark's
 prompt shape (choices, paragraph titles, arithmetic, code stubs) and, in discussion rounds,
 sometimes adopts the most common peer answer, so offline runs exercise votes, ties and
-convergence. Accuracy is set per model with ``params = { accuracy = 0.7 }``.
+convergence. In solo self-checks it sometimes re-solves the problem, so solo trajectories
+change answers. Accuracy is set per model with ``params = { accuracy = 0.7 }``.
 """
 
 from __future__ import annotations
@@ -15,10 +16,11 @@ from collections import Counter
 
 from workforce.models.base import ChatRequest, ModelSpec
 from workforce.protocol.parsing import parse_output
-from workforce.protocol.prompts import PEER_HEADING
+from workforce.protocol.prompts import PEER_HEADING, SOLO_CHECK_HEADING
 from workforce.tasks.toy import COMPUTE_PREFIX
 
 _PEER_PREFIX = PEER_HEADING.split("{")[0]
+_SOLO_PREFIX = SOLO_CHECK_HEADING.split("{")[0]
 _VOCABULARY = [
     "consider",
     "the",
@@ -101,6 +103,11 @@ def default_responder(request: ChatRequest, spec: ModelSpec) -> str:
         answer, extra = _fresh_answer(problem, rng, accuracy)
         return f"{_filler(rng)}\n{extra}<answer>{answer}</answer>\n{confidence}"
     own = parse_output(previous[-1]).answer_text or "unknown"
+    if last.startswith(_SOLO_PREFIX):
+        answer, extra = _fresh_answer(problem, rng, accuracy) if rng.random() < 0.35 else (own, "")
+        return (
+            f"<critique>{_filler(rng)}</critique>\n{extra}<answer>{answer}</answer>\n{confidence}"
+        )
     peers = (
         re.findall(r"<answer>(.*?)</answer>", last, flags=re.DOTALL) if _PEER_PREFIX in last else []
     )

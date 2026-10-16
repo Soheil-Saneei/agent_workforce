@@ -12,6 +12,7 @@ from workforce.design import ExperimentConfig
 from workforce.gateway import CacheMiss, Gateway, SpendCapReached, SpendGuard
 from workforce.models import create_provider
 from workforce.models.base import Provider, QuotaExhaustedError
+from workforce.protocol.solo import SoloProtocol
 from workforce.protocol.team import TeamProtocol, TrialSpec
 from workforce.store import RunStore, now_iso
 from workforce.tasks import Item, Task, create_task
@@ -99,7 +100,13 @@ async def execute(
         SpendGuard(config.run.max_spend_usd, store.spent_usd),
         offline=offline,
     )
-    protocols = {name: TeamProtocol(config, task, gateway) for name, task in tasks.items()}
+    team_protocols = {name: TeamProtocol(config, task, gateway) for name, task in tasks.items()}
+    solo_protocols = {name: SoloProtocol(config, task, gateway) for name, task in tasks.items()}
+
+    def protocol(trial: TrialSpec) -> TeamProtocol | SoloProtocol:
+        solo = trial.condition.communication.mode == "solo"
+        return (solo_protocols if solo else team_protocols)[trial.benchmark]
+
     trials = build_trials(config, items)
     pending = [t for t in trials if not store.has_trial(t.key)]
     report = RunReport(store.dir, len(trials), len(trials) - len(pending))
@@ -129,7 +136,7 @@ async def execute(
             if stop.is_set():
                 return
             try:
-                record = await protocols[trial.benchmark].run(trial)
+                record = await protocol(trial).run(trial)
             except SpendCapReached as exc:
                 halt("spend_cap", str(exc))
                 return

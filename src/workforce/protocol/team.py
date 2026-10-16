@@ -99,6 +99,42 @@ def canonical_key(key: Any) -> str | None:
     return "h:" + hashlib.sha1(repr(key).encode()).hexdigest()[:16]
 
 
+async def score_turns(task: Task, item: Item, turns: Sequence[Turn]) -> None:
+    """Set each answered turn's equivalence key, correctness and benchmark metrics."""
+    answered = [t for t in turns if t.has_answer]
+    keys = await task.equivalence_keys(item, [t.answer for t in answered])
+    for turn, key in zip(answered, keys, strict=True):
+        turn.key = canonical_key(key)
+        score = await task.score(item, turn.answer, turn.evidence)
+        turn.correct = score.correct
+        turn.metrics = score.metrics
+
+
+def vote_summary(
+    chosen: Sequence[Turn | None], confidences: Sequence[float | None], seed: int
+) -> dict[str, Any]:
+    """Anonymous vote over ``chosen`` (one ballot per agent; None abstains), as recorded."""
+    outcome: VoteOutcome = anonymous_vote(
+        [t.key if t is not None else None for t in chosen],
+        confidences,
+        random.Random(derive_seed(seed, "vote")),
+    )
+    representative = None
+    if outcome.winner is not None:
+        members = [t for t in chosen if t is not None and t.key == outcome.winner]
+        representative = min(members, key=lambda t: (-(confidences[t.agent] or 0.0), t.agent))
+    return {
+        "key": outcome.winner,
+        "answer_display": representative.answer_display if representative else "",
+        "correct": bool(representative and representative.correct),
+        "metrics": representative.metrics if representative else {},
+        "representative_agent": representative.agent if representative else None,
+        "tie_break": outcome.tie_break,
+        "counts": outcome.counts,
+        "weights": outcome.weights,
+    }
+
+
 class TeamProtocol:
     def __init__(self, config: ExperimentConfig, task: Task, gateway: Gateway):
         self.config = config
@@ -286,36 +322,7 @@ class TeamProtocol:
         return views
 
     async def _score(self, item: Item, turns: list[list[Turn]]) -> None:
-        answered = [t for phase in turns for t in phase if t.has_answer]
-        keys = await self.task.equivalence_keys(item, [t.answer for t in answered])
-        for turn, key in zip(answered, keys, strict=True):
-            turn.key = canonical_key(key)
-            score = await self.task.score(item, turn.answer, turn.evidence)
-            turn.correct = score.correct
-            turn.metrics = score.metrics
-
-    def _vote(
-        self, chosen: list[Turn | None], confidences: list[float | None], seed: int
-    ) -> dict[str, Any]:
-        outcome: VoteOutcome = anonymous_vote(
-            [t.key if t is not None else None for t in chosen],
-            confidences,
-            random.Random(derive_seed(seed, "vote")),
-        )
-        representative = None
-        if outcome.winner is not None:
-            members = [t for t in chosen if t is not None and t.key == outcome.winner]
-            representative = min(members, key=lambda t: (-(confidences[t.agent] or 0.0), t.agent))
-        return {
-            "key": outcome.winner,
-            "answer_display": representative.answer_display if representative else "",
-            "correct": bool(representative and representative.correct),
-            "metrics": representative.metrics if representative else {},
-            "representative_agent": representative.agent if representative else None,
-            "tie_break": outcome.tie_break,
-            "counts": outcome.counts,
-            "weights": outcome.weights,
-        }
+        await score_turns(self.task, item, [t for phase in turns for t in phase])
 
     def _record(
         self,
@@ -353,8 +360,8 @@ class TeamProtocol:
                 for a in assignments
             ],
             "turns": [[asdict(t) for t in phase] for phase in turns],
-            "team": self._vote(final, pre_confidence, trial_seed),
-            "initial_vote": self._vote(initial, pre_confidence, trial_seed),
+            "team": vote_summary(final, pre_confidence, trial_seed),
+            "initial_vote": vote_summary(initial, pre_confidence, trial_seed),
             "initial_correct": [t.correct if t else None for t in initial],
             "final_correct": [t.correct if t else None for t in final],
             "oracle_initial": any(t is not None and t.correct for t in initial),

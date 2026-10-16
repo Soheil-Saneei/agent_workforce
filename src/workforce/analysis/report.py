@@ -13,6 +13,7 @@ from workforce.analysis.metrics import (
     gain_rows,
     procedure_rows,
 )
+from workforce.analysis.solo import checkpoint_rows, curve_rows, solo_trials
 from workforce.store import RunStore
 
 
@@ -190,6 +191,113 @@ def metric_tables(rows: Sequence[dict[str, Any]]) -> str:
     return "\n\n".join(tables)
 
 
+def solo_checkpoint_table(rows: Sequence[dict[str, Any]]) -> str:
+    return _table(
+        [
+            "Benchmark",
+            "Condition",
+            "Checkpoint",
+            "Reached",
+            "Accuracy [95% CI]",
+            "Gain vs previous",
+            "Gain vs initial (reached)",
+            "Abstention",
+            "Tokens used",
+            "Output tokens",
+            "Steps",
+            "Answer changed",
+        ],
+        [
+            [
+                r["benchmark"],
+                r["condition"],
+                f"{r['tokens']:,}",
+                _f(r["reached"], 2),
+                _estimate(r["accuracy"]),
+                _estimate(r["gain_vs_previous"], signed=True),
+                _estimate(r["gain_vs_initial"], signed=True),
+                _f(r["abstention"], 2),
+                _tokens(r["spent"]),
+                _tokens(r["output_tokens"]),
+                _f(r["steps"], 1),
+                _f(r["changed"], 2),
+            ]
+            for r in rows
+        ],
+    )
+
+
+def solo_curve_table(rows: Sequence[dict[str, Any]]) -> str:
+    return _table(
+        [
+            "Benchmark",
+            "Condition",
+            "Items",
+            "Initial answer",
+            "End of trajectory",
+            "End - initial",
+            "Best checkpoint",
+            "Plateau from",
+            "Abstention initial / end",
+            "Wrong->right / right->wrong",
+            "Steps",
+            "Overshoot tokens",
+        ],
+        [
+            [
+                r["benchmark"],
+                r["condition"],
+                str(r["items"]),
+                _estimate(r["initial_accuracy"]),
+                _estimate(r["final_accuracy"]),
+                _estimate(r["final_minus_initial"], signed=True),
+                f"{r['best_tokens']:,} ({_f(r['best_accuracy'])})",
+                f"{r['plateau_tokens']:,}",
+                f"{_f(r['initial_abstention'], 2)} / {_f(r['final_abstention'], 2)}",
+                f"{r['wrong_to_right']} / {r['right_to_wrong']}",
+                _f(r["steps"], 1),
+                _tokens(r["overshoot"]),
+            ]
+            for r in rows
+        ],
+    )
+
+
+def solo_section(trials: Sequence[dict[str, Any]]) -> list[str]:
+    if not solo_trials(trials):
+        return []
+    return [
+        "## Solo scaling",
+        "One agent answers, then checks and revises its own work until it has spent the "
+        "problem's budget. Each checkpoint holds the latest answer of a step that finished "
+        "within that many tokens (a trajectory with no answer yet counts as wrong; 'Reached' is "
+        "the share that had one). Tokens are counted as the budget counts them. Gains are "
+        "paired over items; 'Gain vs initial' compares with the same trajectory's first "
+        "answer. 'Plateau from' is the first checkpoint within "
+        "0.02 of the best checkpoint's accuracy.",
+        solo_curve_table(curve_rows(trials)),
+        solo_checkpoint_table(checkpoint_rows(trials)),
+    ]
+
+
+def solo_checkpoints_csv(trials: Sequence[dict[str, Any]]) -> str:
+    estimates = ("accuracy", "gain_vs_previous", "gain_vs_initial")
+    flat = []
+    for row in checkpoint_rows(trials):
+        out = {k: v for k, v in row.items() if k not in estimates}
+        for name in estimates:
+            est = row[name] or {}
+            ci = est.get("ci") or (None, None)
+            out[name], out[f"{name}_ci_low"], out[f"{name}_ci_high"] = est.get("mean"), *ci
+        flat.append(out)
+    buffer = io.StringIO()
+    if flat:
+        writer = csv.DictWriter(buffer, fieldnames=list(flat[0]))
+        writer.writeheader()
+        writer.writerows(flat)
+    return buffer.getvalue()
+
+
 def summarize(store: RunStore) -> str:
     trials = store.trials()
     if not trials:
@@ -224,6 +332,7 @@ def summarize(store: RunStore) -> str:
         metric_tables(benchmark_metric_rows(trials)),
         "## Procedures (initial answers)",
         procedure_table(procedure_rows(trials)),
+        *solo_section(trials),
     ]
     return "\n\n".join(parts) + "\n"
 
@@ -249,4 +358,7 @@ def write_reports(store: RunStore) -> str:
     text = summarize(store)
     (store.dir / "summary.md").write_text(text)
     (store.dir / "conditions.csv").write_text(conditions_csv(store))
+    trials = store.trials()
+    if solo_trials(trials):
+        (store.dir / "solo_checkpoints.csv").write_text(solo_checkpoints_csv(trials))
     return text

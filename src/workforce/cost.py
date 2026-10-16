@@ -22,7 +22,7 @@ from workforce.runner import used_models
 from workforce.tasks.registry import create_task
 
 # Number of items when a target config asks for the whole benchmark (items unset).
-FULL_SIZES = {"musique": 2417, "musr": 756, "humaneval": 164}
+FULL_SIZES = {"musique": 2417, "musr": 756, "humaneval": 164, "aime": 60}
 
 
 def target_items(config: ExperimentConfig, benchmark: str) -> int:
@@ -47,10 +47,14 @@ def _price(config: ExperimentConfig, override: Price | None) -> Price:
 def budget_bound(config: ExperimentConfig, price: Price | None = None) -> dict[str, Any]:
     price = _price(config, price)
     conditions = config.conditions()
+    # A solo trajectory's last step may finish past the budget by up to one output ceiling.
+    overshoot = config.generation.max_output_tokens_per_call
+    solo = sum(1 for c in conditions if c.communication.mode == "solo")
     rows = []
     for name, bench in config.benchmarks.items():
-        trials = target_items(config, name) * config.replications * len(conditions)
-        tokens = trials * bench.budget_tokens
+        per_condition = target_items(config, name) * config.replications
+        trials = per_condition * len(conditions)
+        tokens = trials * bench.budget_tokens + per_condition * solo * overshoot
         rows.append(
             {
                 "benchmark": name,

@@ -79,6 +79,11 @@ class Task(ABC):
     def display_answer(self, answer: Any | None) -> str:
         return "" if answer is None else str(answer)
 
+    def is_abstention(self, answer: Any | None) -> bool:
+        """The agent declined to commit: no parsable answer, or an explicit non-answer such as
+        "not stated" where the task has one."""
+        return answer is None
+
     async def aclose(self) -> None:  # noqa: B027 - optional hook
         """Release resources (for example sandbox workers)."""
 

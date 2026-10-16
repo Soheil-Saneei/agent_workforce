@@ -57,14 +57,14 @@ def per_item(trials: Iterable[Trial], value: Callable[[Trial], float | None]) ->
     return {item: sum(vs) / len(vs) for item, vs in buckets.items()}
 
 
-def _estimate(item_values: dict[str, float]) -> dict[str, Any]:
+def item_estimate(item_values: dict[str, float]) -> dict[str, Any]:
     values = list(item_values.values())
     return {"mean": mean(values), "ci": bootstrap_ci(values), "n_items": len(values)}
 
 
-def _paired(a: dict[str, float], b: dict[str, float]) -> dict[str, Any]:
+def paired_estimate(a: dict[str, float], b: dict[str, float]) -> dict[str, Any]:
     shared = sorted(set(a) & set(b))
-    return _estimate({i: a[i] - b[i] for i in shared})
+    return item_estimate({i: a[i] - b[i] for i in shared})
 
 
 # Per-trial values ---------------------------------------------------------------------------
@@ -176,7 +176,7 @@ def condition_rows(trials: Sequence[Trial]) -> list[dict[str, Any]]:
             "communication": cond["communication"],
             "model_assignment": cond["model_assignment"],
             "trials": len(group),
-            "accuracy": _estimate(per_item(group, team_correct)),
+            "accuracy": item_estimate(per_item(group, team_correct)),
             "individual_accuracy": mean([individual_mean(t) for t in group]),
             "oracle_accuracy": mean([float(t["oracle_initial"]) for t in group]),
             "oracle_any_accuracy": mean([float(t["oracle_any"]) for t in group]),
@@ -274,20 +274,22 @@ def gain_rows(trials: Sequence[Trial]) -> list[dict[str, Any]]:
             row: dict[str, Any] = {"benchmark": bench, "condition": cid, **_labels(cond)}
             baseline = _baseline(conditions, cond)
             row["generation_gain"] = (
-                _paired(
+                paired_estimate(
                     per_item(group, lambda t: float(t["oracle_initial"])),
                     per_item(groups[baseline], team_correct),
                 )
                 if baseline
                 else None
             )
-            row["selection_gain"] = _paired(team, per_item(group, individual_mean))
+            row["selection_gain"] = paired_estimate(team, per_item(group, individual_mean))
             if cond["communication"] != "independent":
                 matched = _matched_independent(conditions, cond)
                 row["coordination_gain"] = (
-                    _paired(team, per_item(groups[matched], team_correct)) if matched else None
+                    paired_estimate(team, per_item(groups[matched], team_correct))
+                    if matched
+                    else None
                 )
-                row["coordination_gain_paired"] = _paired(
+                row["coordination_gain_paired"] = paired_estimate(
                     team, per_item(group, initial_vote_correct)
                 )
             rows.append(row)

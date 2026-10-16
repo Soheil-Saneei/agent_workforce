@@ -27,21 +27,24 @@ class ConfigError(ValueError):
 
 @dataclass(frozen=True)
 class Communication:
-    mode: str  # "independent" | "horizontal"
+    mode: str  # "independent" | "horizontal" | "solo"
     rounds: int
 
     @property
     def id(self) -> str:
-        return "independent" if self.mode == "independent" else f"horizontal-{self.rounds}r"
+        return self.mode if self.mode in ("independent", "solo") else f"horizontal-{self.rounds}r"
 
     @classmethod
     def parse(cls, value: str) -> Communication:
         if value in ("independent", "none"):
             return cls("independent", 0)
+        if value == "solo":
+            return cls("solo", 0)
         match = re.fullmatch(r"horizontal(?:-(\d+)r)?", value)
         if not match:
             raise ConfigError(
-                f"communication {value!r}: use 'independent', 'horizontal' or 'horizontal-<k>r'"
+                f"communication {value!r}: use 'independent', 'horizontal', 'horizontal-<k>r' "
+                "or 'solo'"
             )
         rounds = int(match.group(1) or 1)
         if rounds < 1:
@@ -111,6 +114,18 @@ class BudgetConfig:
     input_margin: float = 0.02
 
 
+DEFAULT_CHECKPOINTS = (1000, 2000, 4000, 8000, 16000, 32000)
+
+
+@dataclass(frozen=True)
+class SoloConfig:
+    """Solo iteration (``communication = "solo"``): the cumulative token counts at which the
+    agent's current answer is recorded, and a safety limit on the number of steps."""
+
+    checkpoints: tuple[int, ...] = DEFAULT_CHECKPOINTS
+    max_steps: int = 64
+
+
 @dataclass(frozen=True)
 class RunConfig:
     trial_concurrency: int = 8
@@ -144,13 +159,17 @@ class ExperimentConfig:
     procedures: dict[str, Procedure]
     raw: dict[str, Any]
     description: str = ""
+    solo: SoloConfig = field(default_factory=SoloConfig)
 
     @property
     def hash(self) -> str:
         return hashlib.sha256(json.dumps(self.raw, sort_keys=True).encode()).hexdigest()[:16]
 
     def is_degenerate(self, condition: Condition) -> bool:
-        """A single agent cannot be procedurally diverse or mixed-model."""
+        """A single agent cannot be procedurally diverse or mixed-model, and solo iteration is
+        defined for one agent only."""
+        if condition.communication.mode == "solo" and condition.team_size > 1:
+            return True
         if condition.team_size > 1:
             return False
         procedures = set(self.diversity_levels[condition.diversity].for_size(1))
@@ -222,6 +241,7 @@ _TOP_LEVEL = {
     "model_assignments",
     "diversity",
     "procedures",
+    "solo",
 }
 
 
@@ -367,6 +387,13 @@ def config_from_dict(raw: dict[str, Any]) -> ExperimentConfig:
     if not benchmarks:
         raise ConfigError("config: define at least one benchmark under [benchmarks.<name>]")
 
+    solo_raw = raw.get("solo", {})
+    _check_keys(solo_raw, {"checkpoints", "max_steps"}, "solo")
+    solo = SoloConfig(
+        checkpoints=tuple(int(c) for c in solo_raw.get("checkpoints", DEFAULT_CHECKPOINTS)),
+        max_steps=int(solo_raw.get("max_steps", SoloConfig.max_steps)),
+    )
+
     factors = raw.get("factors", {})
     _check_keys(factors, {"team_size", "diversity", "communication", "model_assignment"}, "factors")
     config = ExperimentConfig(
@@ -389,6 +416,7 @@ def config_from_dict(raw: dict[str, Any]) -> ExperimentConfig:
         diversity_levels=diversity_levels,
         procedures=procedures,
         raw=raw,
+        solo=solo,
     )
     _validate(config)
     return config
@@ -418,6 +446,8 @@ def _validate(config: ExperimentConfig) -> None:
         for model in config.model_assignments[name].models:
             if model not in config.models:
                 raise ConfigError(f"model_assignments.{name}: unknown model {model!r}")
+    if any(c.communication.mode == "solo" for c in config.conditions()):
+        _validate_solo(config)
     if config.run.max_spend_usd is not None:
         missing = [
             spec.name
@@ -428,6 +458,22 @@ def _validate(config: ExperimentConfig) -> None:
             raise ConfigError(
                 f"run.max_spend_usd is set but no price is known for model(s) {missing}; "
                 "add a price table to each"
+            )
+
+
+def _validate_solo(config: ExperimentConfig) -> None:
+    checkpoints = config.solo.checkpoints
+    if not checkpoints or any(c <= 0 for c in checkpoints):
+        raise ConfigError("solo.checkpoints must be a non-empty list of positive token counts")
+    if list(checkpoints) != sorted(set(checkpoints)):
+        raise ConfigError("solo.checkpoints must be strictly increasing")
+    if config.solo.max_steps < 1:
+        raise ConfigError("solo.max_steps must be >= 1")
+    for name, bench in config.benchmarks.items():
+        if checkpoints[-1] > bench.budget_tokens:
+            raise ConfigError(
+                f"benchmarks.{name}: budget_tokens ({bench.budget_tokens:,}) is the solo "
+                f"horizon and must cover the largest checkpoint ({checkpoints[-1]:,})"
             )
 
 

@@ -39,8 +39,9 @@ with open("program.py") as _handle:
 
 # Adapted from openai/human-eval execution.reliability_guard (MIT licence).
 faulthandler.disable()
-builtins.exit = None
-builtins.quit = None
+if not {script}:
+    builtins.exit = None
+    builtins.quit = None
 os.environ["OMP_NUM_THREADS"] = "1"
 for _name in ("kill", "system", "putenv", "remove", "removedirs", "rmdir", "fchdir", "setuid",
               "fork", "forkpty", "killpg", "rename", "renames", "truncate", "replace", "unlink",
@@ -55,7 +56,7 @@ subprocess.Popen = None
 for _mod in ("ipdb", "joblib", "resource", "psutil", "tkinter"):
     sys.modules[_mod] = None
 
-exec(_code, {{"__name__": "__candidate__"}})
+exec(_code, {{"__name__": "__main__" if {script} else "__candidate__"}})
 """
 
 
@@ -84,17 +85,31 @@ class Sandbox:
             self._semaphores[loop_id] = asyncio.Semaphore(self.max_workers)
         return self._semaphores[loop_id]
 
-    async def run(self, program: str, timeout_s: float = 10.0) -> ExecResult:
+    async def run(
+        self,
+        program: str,
+        timeout_s: float = 10.0,
+        *,
+        stdin: str | None = None,
+        script: bool = False,
+    ) -> ExecResult:
+        """Run ``program`` with ``stdin`` as its standard input. ``script`` runs it as a
+        standalone script (``__name__ == "__main__"``, ``exit()`` available), as a judge would;
+        otherwise it is imported as a module with ``exit`` disabled (the HumanEval guard)."""
         async with self._semaphore():
-            return await self._run(program, timeout_s)
+            return await self._run(program, timeout_s, stdin, script)
 
-    async def _run(self, program: str, timeout_s: float) -> ExecResult:
+    async def _run(
+        self, program: str, timeout_s: float, stdin: str | None, script: bool
+    ) -> ExecResult:
         workdir = Path(tempfile.mkdtemp(prefix="workforce-sandbox-"))
         try:
             (workdir / "program.py").write_text(program)
             (workdir / "runner.py").write_text(
                 _GUARD.format(
-                    cpu_seconds=int(timeout_s) + 1, memory_bytes=self.memory_mb * 1024 * 1024
+                    cpu_seconds=int(timeout_s) + 1,
+                    memory_bytes=self.memory_mb * 1024 * 1024,
+                    script=script,
                 )
             )
             env = {
@@ -111,13 +126,15 @@ class Sandbox:
                 "runner.py",
                 cwd=workdir,
                 env=env,
-                stdin=asyncio.subprocess.DEVNULL,
+                stdin=asyncio.subprocess.DEVNULL if stdin is None else asyncio.subprocess.PIPE,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
                 start_new_session=True,
             )
             try:
-                stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout_s)
+                stdout, stderr = await asyncio.wait_for(
+                    proc.communicate(None if stdin is None else stdin.encode()), timeout_s
+                )
             except TimeoutError:
                 _kill_group(proc.pid)
                 await proc.wait()

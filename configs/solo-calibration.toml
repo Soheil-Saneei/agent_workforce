@@ -1,0 +1,67 @@
+# Solo-scaling calibration: how a single agent's accuracy changes as it may spend more tokens
+# working alone, per benchmark, to choose benchmarks for the collaboration-onset study.
+#
+#   uv run workforce run configs/solo-calibration.toml --items 2 --max-spend 1   # smoke
+#   uv run workforce run configs/solo-calibration.toml --env-file /path/to/.env
+#   uv run workforce plot-solo runs/solo-calibration-<time> --out solo-curves.png
+#
+# One agent answers, then checks and revises its own work until it has spent the problem's
+# budget (32k tokens, input + output); its current answer is scored at every checkpoint, so one
+# trajectory per item and replication yields the whole curve (see protocol/solo.py).
+
+[experiment]
+name = "solo-calibration"
+seed = 20261016
+replications = 2
+description = "Solo accuracy vs tokens at 1k-32k on five benchmarks, gpt-6-luna effort none."
+
+[benchmarks.musique]
+items = 50
+# Every MuSiQue-Answerable question has an answer; say so, against the abstention drift the
+# pilot saw under self-revision.
+options = { assert_answerable = true }
+
+[benchmarks.musr]
+items = 51  # 17 per domain
+
+[benchmarks.humaneval]
+items = 50
+
+[benchmarks.aime]
+items = 60  # all of AIME 2025 and 2026
+
+[benchmarks.livecodebench]
+items = 50
+options = { difficulties = ["medium", "hard"] }
+
+[factors]
+team_size = [1]
+diversity = ["identical"]
+communication = ["solo"]
+model_assignment = ["homogeneous"]
+
+[solo]
+checkpoints = [1000, 2000, 4000, 8000, 16000, 32000]
+
+[generation]
+temperature = 0.7
+max_output_tokens_per_call = 8192
+min_output_tokens = 200
+
+[budget]
+count = "total"
+tokens_per_problem = 32000  # the solo horizon: each trajectory works until it has spent this
+
+# Same model as the pilot, so results are comparable and all reasoning is visible text.
+[models.base]
+provider = "openai"
+model = "gpt-6-luna"
+params = { reasoning_effort = "none" }
+concurrency = 24
+
+[model_assignments.homogeneous]
+models = ["base"]
+
+[run]
+trial_concurrency = 32
+max_spend_usd = 8.5
