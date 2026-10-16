@@ -201,6 +201,7 @@ def solo_checkpoint_table(rows: Sequence[dict[str, Any]]) -> str:
             "Accuracy [95% CI]",
             "Gain vs previous",
             "Gain vs initial (reached)",
+            "Answer F1",
             "Abstention",
             "Tokens used",
             "Output tokens",
@@ -216,6 +217,7 @@ def solo_checkpoint_table(rows: Sequence[dict[str, Any]]) -> str:
                 _estimate(r["accuracy"]),
                 _estimate(r["gain_vs_previous"], signed=True),
                 _estimate(r["gain_vs_initial"], signed=True),
+                _f(r["metrics"].get("f1")),
                 _f(r["abstention"], 2),
                 _tokens(r["spent"]),
                 _tokens(r["output_tokens"]),
@@ -273,8 +275,9 @@ def solo_section(trials: Sequence[dict[str, Any]]) -> list[str]:
         "within that many tokens (a trajectory with no answer yet counts as wrong; 'Reached' is "
         "the share that had one). Tokens are counted as the budget counts them. Gains are "
         "paired over items; 'Gain vs initial' compares with the same trajectory's first "
-        "answer. 'Plateau from' is the first checkpoint within "
-        "0.02 of the best checkpoint's accuracy.",
+        "answer. 'Answer F1' is the mean token F1 where the benchmark has one (MuSiQue), with "
+        "no answer counting 0. 'Plateau from' is the first checkpoint within 0.02 of the best "
+        "checkpoint's accuracy.",
         solo_curve_table(curve_rows(trials)),
         solo_checkpoint_table(checkpoint_rows(trials)),
     ]
@@ -282,9 +285,12 @@ def solo_section(trials: Sequence[dict[str, Any]]) -> list[str]:
 
 def solo_checkpoints_csv(trials: Sequence[dict[str, Any]]) -> str:
     estimates = ("accuracy", "gain_vs_previous", "gain_vs_initial")
+    rows = checkpoint_rows(trials)
+    names = sorted({n for row in rows for n in row["metrics"]})
     flat = []
-    for row in checkpoint_rows(trials):
-        out = {k: v for k, v in row.items() if k not in estimates}
+    for row in rows:
+        out = {k: v for k, v in row.items() if k not in (*estimates, "metrics")}
+        out.update({f"metric_{n}": row["metrics"].get(n) for n in names})
         for name in estimates:
             est = row[name] or {}
             ci = est.get("ci") or (None, None)

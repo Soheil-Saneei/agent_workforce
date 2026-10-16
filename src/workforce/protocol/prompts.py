@@ -89,6 +89,10 @@ def discussion_message(
 # Solo iteration ----------------------------------------------------------------------------
 # A solo step's prompt depends only on the step index, never on the token horizon, so a
 # trajectory's requests are the same however long it is allowed to run (see protocol/solo.py).
+SOLO_COMMIT = (
+    "The problem has a definite correct answer and a response without one is scored as wrong, "
+    "so always commit to your single best answer, even if some doubt remains."
+)
 SOLO_CHECK_HEADING = "Self-check {step}."
 SOLO_CHECK_METHODS = (
     "Solve the problem again from the beginning without relying on your earlier work, by a "
@@ -107,7 +111,7 @@ def solo_initial_message(task: Task, item: Item) -> Message:
     parts = [
         task.problem_prompt(item),
         "Work through the problem following your procedure, writing out your reasoning in full "
-        "before you answer.",
+        f"before you answer. {SOLO_COMMIT}",
         task.answer_format(),
         CONFIDENCE_INSTRUCTION,
     ]
@@ -121,9 +125,7 @@ def solo_check_message(task: Task, step: int) -> Message:
         f"{SOLO_CHECK_HEADING.format(step=step)} Check your latest solution above with this "
         f"method:\n{method}",
         "Change your answer only if the check reveals a concrete mistake; if it confirms your "
-        "answer, keep it. The problem has a definite correct answer and a response without one "
-        "is scored as wrong, so always commit to your single best answer, even if some doubt "
-        "remains.",
+        f"answer, keep it. {SOLO_COMMIT}",
         "Write your check inside <critique>...</critique>, showing your work. Then give your "
         "answer, which may keep or change your previous answer, in exactly the same format as "
         "before:",

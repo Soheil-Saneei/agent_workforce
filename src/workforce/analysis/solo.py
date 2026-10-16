@@ -45,6 +45,7 @@ def checkpoint_rows(trials: Sequence[Trial]) -> list[dict[str, Any]]:
             points = [_at(t, index) for t in group]
             reached = [t for t in group if _at(t, index)["steps"] > 0]
             correct = per_item(group, lambda t, i=index: float(_at(t, i)["correct"]))
+            names = sorted({k for t in group for k in _at(t, index)["metrics"]})
             changed = [
                 float(_at(t, index)["key"] != _at(t, index - 1)["key"])
                 for t in group
@@ -63,6 +64,10 @@ def checkpoint_rows(trials: Sequence[Trial]) -> list[dict[str, Any]]:
                     "output_tokens": mean([p["output_tokens"] for p in points]),
                     "steps": mean([p["steps"] for p in points]),
                     "changed": mean(changed),
+                    "metrics": {
+                        n: mean([_at(t, index)["metrics"].get(n, 0.0) for t in group])
+                        for n in names
+                    },
                     "gain_vs_previous": (
                         paired_estimate(correct, previous) if previous is not None else None
                     ),

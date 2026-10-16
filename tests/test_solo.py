@@ -11,7 +11,7 @@ from workforce.analysis.solo import checkpoint_rows, curve_rows
 from workforce.design import Communication, ConfigError
 from workforce.gateway import Gateway, SpendGuard
 from workforce.models.mock import MockProvider, mock_token_count
-from workforce.protocol.prompts import SOLO_CHECK_HEADING, SOLO_CHECK_METHODS
+from workforce.protocol.prompts import SOLO_CHECK_HEADING, SOLO_CHECK_METHODS, SOLO_COMMIT
 from workforce.protocol.solo import SoloAgent, SoloIdentity, SoloProtocol, SoloState
 from workforce.protocol.team import TrialSpec
 from workforce.runner import rebuild_trials
@@ -183,11 +183,12 @@ def test_self_checks_rotate_methods_and_carry_the_whole_trajectory(tmp_path):
     assert len(requests) >= 4
     first = requests[0].messages[-1].content
     assert "Compute: " in first and "writing out your reasoning in full" in first
+    assert SOLO_COMMIT in first
     for k, request in enumerate(requests[1:], start=1):
         last = request.messages[-1].content
         assert last.startswith(SOLO_CHECK_HEADING.format(step=k))
         assert SOLO_CHECK_METHODS[(k - 1) % len(SOLO_CHECK_METHODS)] in last
-        assert "always commit to your single best answer" in last
+        assert SOLO_COMMIT in last
         assert len(request.messages) == 2 + 2 * k  # system, then every earlier exchange
         assert request.max_output_tokens == config.generation.max_output_tokens_per_call
     assert not any("Length limit" in m.content for r in requests for m in r.messages)
@@ -301,6 +302,7 @@ def _trial(item, steps_correct, checkpoints, initial=None):
                     "key": key,
                     "correct": correct,
                     "abstained": False,
+                    "metrics": {"f1": 0.5 + 0.5 * correct} if steps else {},
                 }
                 for tokens, correct, steps, key in checkpoints
             ],
@@ -330,6 +332,7 @@ def test_checkpoint_and_curve_rows():
     assert rows[1]["gain_vs_previous"]["mean"] == pytest.approx(2 / 3)
     assert rows[2]["changed"] == pytest.approx(2 / 3)
     assert rows[2]["gain_vs_initial"]["mean"] == pytest.approx(0.0)  # +1, 0, -1
+    assert rows[0]["metrics"] == {} and rows[2]["metrics"]["f1"] == pytest.approx(2.5 / 3)
     (curve,) = curve_rows(trials)
     assert curve["wrong_to_right"] == 1 and curve["right_to_wrong"] == 1
     assert curve["best_tokens"] == 200 and curve["plateau_tokens"] == 200
