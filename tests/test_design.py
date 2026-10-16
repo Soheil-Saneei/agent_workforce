@@ -44,7 +44,7 @@ def test_include_degenerate_keeps_the_full_grid():
 
 
 def test_first_experiment_grid_has_ten_conditions():
-    config = load_config(Path(__file__).parent.parent / "configs" / "pilot.toml")
+    config = load_config(Path(__file__).parent.parent / "configs" / "team-study.toml")
     assert len(config.conditions()) == 10
     assert {c.communication.rounds for c in config.conditions()} == {0, 2}
 

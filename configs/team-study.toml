@@ -1,15 +1,16 @@
-# Pilot of the design doc's "first experiment": N = 1, 3, 5 x identical vs moderate procedures
-# x independent vote vs two-round horizontal discussion, on MuSiQue, MuSR and HumanEval.
+# Team study: the design doc's "first experiment" at 20 items per benchmark. N = 1, 3, 5 x
+# identical vs moderate procedures x independent vote vs two-round horizontal discussion, on
+# MuSiQue, MuSR and HumanEval.
 #
-#   uv run workforce run configs/pilot.toml --env-file /path/to/.env
+#   uv run workforce run configs/team-study.toml --env-file /path/to/.env
 #
 # 20 items per benchmark, 1 replication, 10 conditions (N = 1 is never "moderately diverse").
 
 [experiment]
-name = "pilot"
+name = "team-study"
 seed = 20261004
 replications = 1
-description = "First-experiment pilot: ~20 items per benchmark, 1 replication."
+description = "Team study: the first experiment at 20 items per benchmark, 1 replication."
 
 # Budgets are total (input + output) team tokens per problem. They are sized so the largest
 # condition (N = 5, two rounds) still gets about 600 output tokens per call on a typical item

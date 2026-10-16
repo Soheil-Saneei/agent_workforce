@@ -3,9 +3,9 @@
 * ``budget_bound``: a hard upper bound straight from a config. The harness never lets a trial
   use more than its token budget, so items x replications x conditions x budget, priced as if
   every token were an output token, cannot be exceeded.
-* ``project``: an expected cost from a finished (pilot) run. Mean measured tokens per trial
+* ``project``: an expected cost from a finished (measured) run. Mean measured tokens per trial
   for each (benchmark, condition) are scaled to the target config's item counts and
-  replications; the range is a bootstrap over the pilot's items.
+  replications; the range is a bootstrap over the measured run's items.
 """
 
 from __future__ import annotations
@@ -163,7 +163,7 @@ def projection_markdown(projection: Projection, target: ExperimentConfig) -> str
         f"{target.replications} replications). Price: ${p.input_per_mtok}/M input, "
         f"${p.cached_input_per_mtok}/M cached input, ${p.output_per_mtok}/M output.",
         "",
-        "| Benchmark | Condition | Pilot trials | Mean tokens in / cached / out | USD / trial "
+        "| Benchmark | Condition | Measured trials | Mean tokens in / cached / out | USD / trial "
         "| Target trials | Projected USD |",
         "|---|---|---|---|---|---|---|",
     ]
@@ -178,7 +178,11 @@ def projection_markdown(projection: Projection, target: ExperimentConfig) -> str
     lines += [
         "",
         f"**Projected total: ${projection.total_usd:,.2f}**"
-        + (f" (95% bootstrap range over pilot items ${ci[0]:,.2f} - ${ci[1]:,.2f})" if ci else "")
+        + (
+            f" (95% bootstrap range over measured items ${ci[0]:,.2f} - ${ci[1]:,.2f})"
+            if ci
+            else ""
+        )
         + f"; ${projection.total_usd_no_cache:,.2f} with no prompt-cache discount; "
         f"{projection.total_tokens / 1e6:,.1f}M tokens.",
     ]

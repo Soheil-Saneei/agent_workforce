@@ -48,9 +48,9 @@ def test_cost_projection_scales_measured_tokens(tmp_path):
         "model": "mock-base",
         "price": {"input": 1.0, "output": 2.0, "cached_input": 0.5},
     }
-    pilot = make_config(models={"base": priced})
+    measured = make_config(models={"base": priced})
     store, _ = run_experiment(
-        pilot, tmp_path / "pilot", {"base": MockProvider(pilot.models["base"])}
+        measured, tmp_path / "measured", {"base": MockProvider(measured.models["base"])}
     )
     target = make_config(
         models={"base": priced},
@@ -59,7 +59,7 @@ def test_cost_projection_scales_measured_tokens(tmp_path):
     )
     projection = project(store.trials(), target)
     assert projection.missing == []
-    measured_cost_per_pass = sum(t["cost_usd"] for t in store.trials()) / 4  # 4 pilot items
+    measured_cost_per_pass = sum(t["cost_usd"] for t in store.trials()) / 4  # 4 measured items
     assert projection.total_usd == pytest.approx(measured_cost_per_pass * 40 * 3)
     assert projection.ci_usd[0] <= projection.total_usd <= projection.ci_usd[1]
     bound = budget_bound(target)

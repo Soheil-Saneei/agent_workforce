@@ -13,6 +13,8 @@ from workforce.analysis.metrics import (
 )
 from workforce.analysis.stats import gini, jaccard, phi
 
+from conftest import make_config, run_experiment
+
 
 def trial(
     item,
@@ -218,3 +220,14 @@ def test_item_estimates_do_not_depend_on_trial_order():
     values = {f"item{i}": float(i % 3 == 0) for i in range(30)}
     shuffled = dict(reversed(list(values.items())))
     assert item_estimate(values) == item_estimate(shuffled)
+
+
+def test_plot_team_tradeoff_writes_a_png(tmp_path):
+    pytest.importorskip("matplotlib")
+    from workforce.analysis.plot import plot_team_tradeoff
+
+    store, _ = run_experiment(make_config(), tmp_path / "run")
+    out = plot_team_tradeoff(store.trials(), tmp_path / "plots" / "teams.png")
+    assert out.read_bytes().startswith(b"\x89PNG")
+    with pytest.raises(ValueError, match="no team trials"):
+        plot_team_tradeoff([], tmp_path / "empty.png")

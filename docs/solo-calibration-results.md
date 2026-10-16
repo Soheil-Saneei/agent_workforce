@@ -14,7 +14,8 @@ churn without a reliable net gain) and **HumanEval** (already at the ceiling).
 
 ## How it was measured
 
-- **Model.** `gpt-6-luna`, `reasoning_effort = "none"`, temperature 0.7, the same as the pilot.
+- **Model.** `gpt-6-luna`, `reasoning_effort = "none"`, temperature 0.7, the same as the
+  [team study](team-study-results.md).
   With effort "none" all reasoning is visible text, so every token is accounted for.
 - **What the agent does.** It writes a first answer, then repeatedly checks and revises its own
   work. Each self-check uses one of three methods in rotation: solve again by a different route
@@ -107,8 +108,8 @@ of correct answers into non-answers.
 - Only one revision in the whole benchmark turned a wrong answer right.
 - Looking at partial credit (word overlap with the gold answer) does not change the picture: it
   stays flat at 0.66-0.69.
-- This is the same "abstention drift" the pilot found. Two rounds of self-revision dropped the
-  pilot's single agent from 0.60 to 0.40. The new prompts make it milder, but it is still there.
+- This is the same "abstention drift" the team study found. Two rounds of self-revision dropped
+  its single agent from 0.60 to 0.40. The new prompts make it milder, but it is still there.
 - MuSiQue is also costly to start: the agent needs about 2,700 tokens just to read the
   passages, so the small checkpoints are empty.
 
@@ -136,7 +137,7 @@ wide to rule out a small gain, but any such gain is too small and noisy to build
 
 HumanEval is **at the ceiling**. The first answer is already 0.92, and one self-check brings it
 to 0.98, then 0.99 from 4k on. All of the improvement happens in the first check (10 fixes,
-2 breaks). Nothing is left for the remaining tokens to buy, which matches the pilot, where
+2 breaks). Nothing is left for the remaining tokens to buy, which matches the team study, where
 discussing teams scored 1.00.
 
 ## Tokens actually used

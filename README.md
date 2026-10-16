@@ -18,10 +18,12 @@ how one agent's accuracy grows with the tokens it spends alone.
   32k). MuSiQue gets slightly worse as the agent talks itself into "not stated" answers, MuSR
   shows no reliable gain, and HumanEval is at the ceiling. Keep AIME and LiveCodeBench for the
   collaboration-onset study. Full tables: [Solo-scaling calibration](#solo-scaling-calibration).
-- **[Pilot](#pilot)** of the first experiment (teams of 1, 3 and 5 agents, 20 items per
-  benchmark): validates the pipeline and sizes the full experiment
-  ([cost estimate](#cost-estimate-for-the-full-first-experiment)). Its CIs are too wide for
-  findings.
+- **[Team study: plain-language results](docs/team-study-results.md).** Teams of 1, 3 and 5
+  agents, with identical or diverse procedures, voting or discussing for two rounds, on 20
+  problems per benchmark. No team beat a single agent reliably. Discussion never improved
+  accuracy, cost 3-10x the tokens of voting, and on MuSiQue talked agents into "not stated"
+  answers. Teams often held a correct answer and failed to pick it. Full tables:
+  [Team study](#team-study).
 
 - [How the code fits together](#how-the-code-fits-together)
 - [Setup](#setup)
@@ -31,7 +33,7 @@ how one agent's accuracy grows with the tokens it spends alone.
 - [Design decisions where the doc was ambiguous](#design-decisions-where-the-doc-was-ambiguous)
 - [Measurements](#measurements)
 - [Adding a provider or a benchmark](#adding-a-provider-or-a-benchmark)
-- [Pilot](#pilot)
+- [Team study](#team-study)
 - [Cost estimate for the full first experiment](#cost-estimate-for-the-full-first-experiment)
 - [Solo-scaling calibration](#solo-scaling-calibration)
 - [Data and licenses](#data-and-licenses)
@@ -74,8 +76,9 @@ needs the network. Because every call is logged and keyed by its exact request, 
 |---|---|
 | `README.md` | This file: design, usage, results. |
 | `multi-agent-experimental-design.md` | The study design the harness implements. |
+| `docs/team-study-results.md`, `docs/team-study.png` | Team study write-up and figure. |
 | `docs/solo-calibration-results.md`, `docs/solo-calibration.png` | Solo-scaling calibration write-up and figure. |
-| `configs/*.toml` | Experiment definitions: `pilot`, `first-experiment`, `full-factorial`, `mixed-models.example`, `solo-calibration` (+ `-64k` extension), `smoke-mock` (offline). |
+| `configs/*.toml` | Experiment definitions: `team-study`, `first-experiment`, `full-factorial`, `mixed-models.example`, `solo-calibration` (+ `-64k` extension), `smoke-mock` (offline). |
 | `pyproject.toml`, `uv.lock`, `.python-version` | Package definition (the `workforce` command), pinned dependencies, Python version. |
 | `LICENSE` | MIT License for the code (datasets keep their own licenses). |
 | `AGENTS.md` (`CLAUDE.md` links to it) | Short notes for coding agents working on this repository. |
@@ -157,14 +160,14 @@ Step 5 downloads the benchmarks on first use (about 170 MB, mostly LiveCodeBench
 few cents; drop `--items` and `--max-spend` for the full run (about $2). Every command:
 
 ```sh
-uv run workforce grid configs/pilot.toml                    # print the expanded grid
+uv run workforce grid configs/team-study.toml               # print the expanded grid
 uv run workforce run configs/smoke-mock.toml                # offline mock run (toy task)
-uv run workforce run configs/pilot.toml --mock              # real datasets, mock model
-uv run workforce run configs/pilot.toml --env-file ~/keys/.env
-uv run workforce resume runs/pilot-20261004-120000          # continue after interruption
-uv run workforce summarize runs/pilot-20261004-120000       # rewrite summary.md / conditions.csv
+uv run workforce run configs/team-study.toml --mock         # real datasets, mock model
+uv run workforce run configs/team-study.toml --env-file ~/keys/.env
+uv run workforce resume runs/team-study-20261004-120000     # continue after interruption
+uv run workforce summarize runs/team-study-20261004-120000  # rewrite summary.md / CSVs
 uv run workforce summarize runs/... --rebuild               # re-derive trials from the call log, offline
-uv run workforce estimate-cost --config configs/first-experiment.toml --from-run runs/pilot-...
+uv run workforce estimate-cost --config configs/first-experiment.toml --from-run runs/team-study-...
 uv run workforce plot-solo runs/solo-calibration-... --out solo-curves.png  # accuracy vs tokens
 ```
 
@@ -199,7 +202,7 @@ expand into the full factorial grid. Unknown keys are rejected, so typos fail lo
 
 ```toml
 [experiment]
-name = "pilot"
+name = "team-study"
 seed = 20261004              # all seeds (calls, reveal order, tie-breaks) derive from this
 replications = 1
 
@@ -256,7 +259,7 @@ by_team_size = { 5 = ["decomposition", "analogy", "falsification", "evidence_fir
 counterbalance = true
 ```
 
-Example configs: [`pilot.toml`](configs/pilot.toml) (the pilot),
+Example configs: [`team-study.toml`](configs/team-study.toml) (the team study),
 [`first-experiment.toml`](configs/first-experiment.toml) (the doc's first experiment at full
 scale), [`full-factorial.toml`](configs/full-factorial.toml) (the doc's 3 x 3 x 2 grid with strong
 diversity), [`mixed-models.example.toml`](configs/mixed-models.example.toml) (model assignment
@@ -381,7 +384,7 @@ estimate.
     multiple-choice accuracy, without the paper's domain hints, so all procedures see the same
     prompt. **HumanEval** is pass@1 on the official hidden tests. The MuSiQue option
     `assert_answerable` (off by default) adds that every question is answerable; see the
-    pilot findings.
+    team study findings.
 
 ## Measurements
 
@@ -466,7 +469,7 @@ A benchmark subclasses `Task` ([`tasks/base.py`](src/workforce/tasks/base.py)): 
 `problem_prompt`, `answer_format`, `parse_answer`, `score`, and optionally `answer_key` /
 `equivalence_keys` for voting. Register it with `@register_task("name")`.
 
-## Pilot
+## Team study
 
 **Model: `gpt-6-luna` with `reasoning_effort = "none"`, temperature 0.7.**
 
@@ -479,17 +482,19 @@ A benchmark subclasses `Task` ([`tasks/base.py`](src/workforce/tasks/base.py)): 
   tokens, the per-call output allowance is the whole response, so the budget is exact.
 - The non-reasoning alternative, `gpt-4.1-mini`, costs 4x as much and is a generation older.
 
-Pilot design: the first experiment's 10 conditions x 20 items per benchmark x 1 replication
-= 600 trials, 4,080 model calls ([`configs/pilot.toml`](configs/pilot.toml)). The hard cost
-bound from the budgets is $24.50; the run's spend cap was $14.
+Design: the first experiment's 10 conditions x 20 items per benchmark x 1 replication = 600
+trials, 4,080 model calls ([`configs/team-study.toml`](configs/team-study.toml)). The hard cost
+bound from the budgets is $24.50; the run's spend cap was $14. The plain-language write-up is
+[`docs/team-study-results.md`](docs/team-study-results.md).
 
-**Run.** `runs/pilot/` (gitignored, kept locally) holds all 4,080 calls: 8.35M input tokens
+**Run.** The run directory (named `runs/pilot/` from before the rename; gitignored, kept
+locally) holds all 4,080 calls: 8.35M input tokens
 (4.93M, 59%, served from OpenAI's prompt cache), 0.72M output tokens, 0 hidden reasoning
 tokens, median call latency 2.3 s. It cost **$0.754**, or **$0.794** including a one-item
 smoke run (`runs/pilot-smoke/`) done first to check format compliance. No trial exceeded its
 budget, the budget bound in only one trial (two N = 5 HumanEval agents were cut off at their
 596-token allowance), and 5 of 4,080 calls (all HumanEval) yielded no parsable answer.
-Two things surfaced and were fixed during the pilot:
+Two things surfaced and were fixed during the study:
 
 - OpenAI's prompt screen rejected 4 benign HumanEval calls (`HTTP 400 Invalid prompt: flagged
   as potentially violating our usage policy`). All four passed on resume, so the flag is now
@@ -501,8 +506,11 @@ Two things surfaced and were fixed during the pilot:
 
 The tables below are regenerated by `uv run workforce summarize runs/pilot` (full version in
 `runs/pilot/summary.md`). Conditions: `n<N>-<ident|mod>-<indep|disc2>`, where disc2 is the
-two-round discussion. **With 20 items and one replication, the 95% CIs are about +-0.2: these
-numbers validate the pipeline and size the full experiment. They are not findings.**
+two-round discussion. **With 20 items and one replication, the 95% CIs on accuracy are about
++-0.2, so only large effects are detectable.** The write-up marks which results are
+statistically supported.
+
+![Team accuracy vs tokens](docs/team-study.png)
 
 #### Primary outcomes
 
@@ -621,20 +629,20 @@ MuSiQue `correct` is the official answer EM. Mean answer F1 is 0.71 for a single
 | musr | falsification | 106 | 0.57 | 3 |
 | musr | general | 320 | 0.59 | 7 |
 
-#### What the pilot suggests for the full experiment
+#### What the team study suggests for the full experiment
 
 - **HumanEval is near ceiling** (a single agent passes 0.85, every discussion team with
   N >= 3 passes 1.00), which leaves little room for team effects. Consider a harder executable
   set, such as HumanEval+ tests or a contamination-resistant benchmark, alongside or instead.
 - **On MuSiQue, discussion pushes agents to abstain.** Among agents' final answers in
-  discussion conditions, "not stated in the paragraphs" and similar rise from 22% (initial) to
+  discussion conditions, "not stated in the paragraphs" and similar rise from 23% (initial) to
   49% after two rounds. Discussion overturns 12-30% of correct initial majorities (independent
-  voting never does), and across all MuSiQue conditions 68 of 112 wrong team answers are
+  voting never does), and across all MuSiQue conditions 70 of 112 wrong team answers are
   abstentions. MuSiQue-Answerable guarantees an answer, so this measures the protocol
   inducing over-caution. Decide whether that is part of the phenomenon or an artifact: the
   benchmark option
   `options = { assert_answerable = true }` tells agents every question is answerable. It is
-  off by default so this pilot still replays.
+  off by default so this study still replays.
 - **The diversity manipulation registers behaviourally, but modestly.** Compared with
   identical teams, moderately diverse teams write less similar initial solutions (lexical
   similarity 0.65-0.70 vs 0.73-0.80 on MuSiQue and HumanEval), make less correlated errors
@@ -660,7 +668,7 @@ Initial-phase input `J` (system + problem + format, tiktoken `o200k_base`):
 
 The budgets are set so the most demanding condition (N = 5, two rounds) still gets about
 600 output tokens per call on a typical item. Smaller teams get proportionally more. In the
-pilot, measured use stayed well below the caps (largest mean: 55k of 100k tokens for N = 5
+team study, measured use stayed well below the caps (largest mean: 55k of 100k tokens for N = 5
 discussion on MuSiQue), so the budget acted as a ceiling that bound only once.
 
 ## Cost estimate for the full first experiment
@@ -670,10 +678,10 @@ replications on 600 MuSiQue items (random sample of the answerable dev split), a
 items and all 164 HumanEval problems, giving 45,600 trials.
 
 ```sh
-uv run workforce estimate-cost --config configs/first-experiment.toml --from-run runs/pilot
+uv run workforce estimate-cost --config configs/first-experiment.toml --from-run runs/pilot   # the team study's run directory
 ```
 
-Mean measured tokens per trial for each (benchmark, condition) in the pilot, scaled to the
+Mean measured tokens per trial for each (benchmark, condition) in the team study, scaled to the
 target's item counts and replications and priced at `gpt-6-luna` rates:
 
 | Benchmark | Target trials | Projected USD |
@@ -683,8 +691,8 @@ target's item counts and replications and priced at `gpt-6-luna` rates:
 | HumanEval (164 items) | 4,920 | 6.82 |
 | **Total** | **45,600** | **$55.85** |
 
-- **Expected: $55.85** (95% bootstrap range over pilot items $52.20-$59.18), 759M tokens.
-- **Without any prompt-cache discount: $96.29.** The pilot's 59% cache-hit rate depends on
+- **Expected: $55.85** (95% bootstrap range over the study's items $52.20-$59.18), 759M tokens.
+- **Without any prompt-cache discount: $96.29.** The team study's 59% cache-hit rate depends on
   running all conditions of an item close together in time, which the runner's trial ordering
   preserves. Moderately diverse agents' prompts start with different system prompts and get
   almost no cache hits, so per-trial dollar costs differ between conditions even at equal token
@@ -698,13 +706,13 @@ lengths):
 
 | Model | Projected | No cache discount |
 |---|---|---|
-| gpt-6-luna (pilot model) | $55.85 | $96.29 |
+| gpt-6-luna (study model) | $55.85 | $96.29 |
 | gpt-5.6-luna | $121.88 | $202.74 |
 | gpt-4.1-mini | $230.03 | $364.80 |
 | gpt-6-sol | $1,117.08 | $1,925.71 |
 
-Assumptions: pilot items are representative of the full sets (MuSiQue items are a random
-sample; MuSR is stratified by domain); replications cost the same as the pilot's single
+Assumptions: the study's items are representative of the full sets (MuSiQue items are a random
+sample; MuSR is stratified by domain); replications cost the same as the study's single
 replication; prices are the 2026-10-04 list prices; Batch API discounts are not used (the
 harness calls the synchronous API).
 
@@ -719,7 +727,7 @@ its own work until it has spent 32k tokens, and the answer it holds is scored at
 the whole curve.
 
 **Setup** ([`configs/solo-calibration.toml`](configs/solo-calibration.toml)). `gpt-6-luna`,
-`reasoning_effort = "none"`, temperature 0.7, as in the pilot. 100 MuSiQue items (with
+`reasoning_effort = "none"`, temperature 0.7, as in the team study. 100 MuSiQue items (with
 `assert_answerable`), 99 MuSR (33 per domain), 100 HumanEval, all 60 AIME 2025-2026 problems and
 100 LiveCodeBench v6 medium/hard problems, 2 replications each: 918 trajectories, 8,064 calls,
 no failed trials. AIME and LiveCodeBench were still rising at 32k, so their trajectories were
@@ -747,7 +755,7 @@ commitment instruction was added to the first prompt too before the calibration.
 - **LiveCodeBench v6, medium + hard** (100 of 132 problems; LeetCode method problems and
   AtCoder stdin programs from January-April 2025), graded on the public and hidden tests as
   LiveCodeBench grades them. It is the newest official release and spans a real difficulty
-  range. HumanEval+ was the alternative, but it is the same 164 problems the pilot already
+  range. HumanEval+ was the alternative, but it is the same 164 problems the team study already
   solves at 0.85-1.00, so stricter tests would add a few points of headroom at most.
 
 Both predate `gpt-6-luna`'s May 2026 knowledge cutoff (no official post-cutoff set with an
@@ -810,7 +818,7 @@ within 0.02 of the best one.
   Extra solo work mostly turns answers into abstentions: of the 7 trajectories that lost a
   correct first answer, 6 ended on "Not stated" or "Cannot be determined". Abstentions grow from
   5.5% to 14% even though the prompt says every question is answerable and every self-check asks
-  for a committed answer. Answer F1 stays at 0.66-0.69. This is the pilot's abstention drift,
+  for a committed answer. Answer F1 stays at 0.66-0.69. This is the team study's abstention drift,
   milder than under two-round self-revision (0.60 to 0.40) but still present under a design
   meant to suppress it.
 - **HumanEval: drop.** It is at ceiling: 0.92 for the first answer and 0.99 from 4k on, all of
@@ -861,7 +869,7 @@ pinned by revision and SHA-256, into `$WORKFORCE_DATA_DIR`, under the source's o
 MuSiQue (CC BY 4.0), MuSR (CC BY 4.0), HumanEval (MIT), AIME via MathArena (CC BY-NC-SA 4.0,
 non-commercial) and LiveCodeBench (Creative Commons per its dataset card, version unstated).
 A run directory copies the items it used, so share run directories under the same terms. Run
-logs from the pilot and the calibration (about 450 MB) are not in git; every result here can
+logs from the team study and the calibration (about 450 MB) are not in git; every result here can
 be regenerated from the configs.
 
 ## Known limitations
@@ -872,7 +880,7 @@ be regenerated from the configs.
   how long agents write, which is the intended manipulation but also a design choice.
 - **Input estimates.** Budget planning counts input tokens with tiktoken plus a 2% + 16-token
   margin. Usage is exact after the call, and an underestimate is recorded as an overrun. In
-  the pilot every estimate was 22-152 tokens above the actual input (median 57), and there were
+  the team study every estimate was 22-152 tokens above the actual input (median 57), and there were
   no overruns. For non-OpenAI models, the default heuristic overestimates.
 - **Determinism.** OpenAI seeds are best effort. Reproducibility rests on the call log (exact
   replay) rather than on regenerating identical outputs.
@@ -884,16 +892,16 @@ be regenerated from the configs.
   security boundary: use a container or VM for untrusted large-scale runs.
 - **Strict MuSiQue EM.** Verbose answers score 0 EM ("Nearly 25,000 students" against
   "nearly 25,000"). F1 is logged alongside, and the prompt asks for a short span. MuSiQue also
-  has some label noise: one pilot item asks for the *country* of a golf club, with gold answer
+  has some label noise: one team study item asks for the *country* of a golf club, with gold answer
   "Maricopa County".
 - **Format compliance.** `gpt-6-luna` often puts HumanEval code outside the `<answer>` tag
-  (33% of HumanEval answers in the pilot). The parser then takes the last code block that
+  (33% of HumanEval answers in the team study). The parser then takes the last code block that
   defines the target function. `untagged_answer_rate` in `conditions.csv` tracks this.
 - **Provider prompt screening.** OpenAI occasionally rejects benign prompts as policy
   violations. These rejections are retried, and a trial that still fails is left
   unrecorded for `resume`, never scored as wrong.
 - **Scale.** A run is one process with asyncio concurrency. `calls.jsonl` stores full
-  prompts per call (11 KB each in the pilot): about 3.5 GB of call logs plus 0.8 GB of
+  prompts per call (11 KB each in the team study): about 3.5 GB of call logs plus 0.8 GB of
   trial records for the full first experiment.
 - **LiveCodeBench run size.** A run stores its items, and LiveCodeBench items carry their
   hidden tests (compressed, about 1 MB per problem), so `items/livecodebench.jsonl` was 100 MB

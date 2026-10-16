@@ -1,4 +1,5 @@
-"""Command line: run, resume, summarize, estimate-cost, grid, fetch-data, plot-solo."""
+"""Command line: run, resume, summarize, estimate-cost, grid, fetch-data, plot-solo,
+plot-teams."""
 
 from __future__ import annotations
 
@@ -143,6 +144,19 @@ def cmd_plot_solo(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_plot_teams(args: argparse.Namespace) -> int:
+    from workforce.analysis.plot import plot_team_tradeoff
+
+    trials = [t for run in args.run_dirs for t in RunStore.open(Path(run)).trials()]
+    try:
+        print(plot_team_tradeoff(trials, Path(args.out)))
+    except ModuleNotFoundError as exc:
+        if exc.name != "matplotlib":
+            raise
+        raise SystemExit("plot-teams needs matplotlib: uv sync --extra plot") from None
+    return 0
+
+
 def cmd_fetch_data(args: argparse.Namespace) -> int:
     for name in args.benchmarks:
         items = create_task(name).load_items(None, 0)
@@ -177,7 +191,9 @@ def build_parser() -> argparse.ArgumentParser:
     )
     summ.set_defaults(func=cmd_summarize)
 
-    cost = sub.add_parser("estimate-cost", help="budget upper bound and pilot-based projection")
+    cost = sub.add_parser(
+        "estimate-cost", help="budget upper bound and projection from a measured run"
+    )
     cost.add_argument("--config", required=True, help="target experiment config")
     cost.add_argument("--from-run", help="run whose measured tokens to scale up")
     cost.add_argument("--price-model", help="price tokens as this OpenAI model instead")
@@ -195,6 +211,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
     plot.add_argument("--out", required=True, help="output .png path")
     plot.set_defaults(func=cmd_plot_solo)
+
+    teams = sub.add_parser("plot-teams", help="plot team accuracy vs tokens per condition (PNG)")
+    teams.add_argument("run_dirs", nargs="+", help="runs whose team trials to plot together")
+    teams.add_argument("--out", required=True, help="output .png path")
+    teams.set_defaults(func=cmd_plot_teams)
 
     fetch = sub.add_parser("fetch-data", help="download and verify benchmark files")
     fetch.add_argument("benchmarks", nargs="+")

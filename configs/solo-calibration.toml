@@ -20,7 +20,7 @@ description = "Solo accuracy vs tokens at 1k-32k on five benchmarks, gpt-6-luna 
 [benchmarks.musique]
 items = 100
 # Every MuSiQue-Answerable question has an answer; say so, against the abstention drift the
-# pilot saw under self-revision.
+# team study saw under self-revision.
 options = { assert_answerable = true }
 
 [benchmarks.musr]
@@ -54,7 +54,7 @@ min_output_tokens = 200
 count = "total"
 tokens_per_problem = 32000  # the solo horizon: each trajectory works until it has spent this
 
-# Same model as the pilot, so results are comparable and all reasoning is visible text.
+# Same model as the team study, so results are comparable and all reasoning is visible text.
 [models.base]
 provider = "openai"
 model = "gpt-6-luna"
