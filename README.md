@@ -624,7 +624,8 @@ paid. Every extended trajectory matched its 32k run call for call, a live check 
 requests do not depend on the horizon. Spend: **$2.45 of the $10 cap** (two 20-trajectory
 smoke runs $0.085, calibration $1.89, extension $0.48). The run directories and the figure are
 in `runs/calibration/` of the primary checkout (gitignored). The figure is also at
-[`docs/solo-calibration.png`](docs/solo-calibration.png).
+[`docs/solo-calibration.png`](docs/solo-calibration.png), and a plain-language write-up of the
+findings is at [`docs/solo-calibration-results.md`](docs/solo-calibration-results.md).
 
 The first smoke run showed 2 of 20 first responses ending without an answer (an AIME problem
 declared "inconsistent", a LiveCodeBench response without code), which the self-check prompt
