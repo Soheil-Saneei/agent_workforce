@@ -5,7 +5,7 @@ description = "Experiment harness for teams of LLM agents under a fixed total to
 license = "MIT"
 license-files = ["LICENSE"]
 authors = [
-    { name = "Soheil-Saneei", email = "soheilsaneei@gmail.com" }
+    { name = "Soheil Saneei", email = "soheilsaneei@gmail.com" }
 ]
 requires-python = ">=3.11"
 # httpx: one async HTTP client for every provider adapter and for dataset downloads.
