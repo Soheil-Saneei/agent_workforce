@@ -1,0 +1,57 @@
+# Extends the solo calibration to 64k tokens on the two benchmarks still rising at 32k.
+#
+# Solo requests never depend on the horizon, so with the 32k run's calls copied in, every step
+# up to 32k is served from the log and only the steps beyond it are paid:
+#
+#   mkdir -p runs/solo-64k/items
+#   grep -E '"benchmark": "(aime|livecodebench)"' runs/solo-calibration/calls.jsonl \
+#     > runs/solo-64k/calls.jsonl
+#   cp runs/solo-calibration/items/{aime,livecodebench}.jsonl runs/solo-64k/items/
+#   uv run workforce run configs/solo-calibration-64k.toml --run-dir runs/solo-64k --env-file ...
+#
+# Seed, replications, item counts and generation settings must match solo-calibration.toml.
+# The spend cap counts the copied calls too (about $1 of it).
+
+[experiment]
+name = "solo-calibration-64k"
+seed = 20261016
+replications = 2
+description = "AIME and LiveCodeBench solo trajectories continued from 32k to 64k tokens."
+
+[benchmarks.aime]
+items = 60
+
+[benchmarks.livecodebench]
+items = 100
+options = { difficulties = ["medium", "hard"] }
+
+[factors]
+team_size = [1]
+diversity = ["identical"]
+communication = ["solo"]
+model_assignment = ["homogeneous"]
+
+[solo]
+checkpoints = [1000, 2000, 4000, 8000, 16000, 32000, 64000]
+
+[generation]
+temperature = 0.7
+max_output_tokens_per_call = 8192
+min_output_tokens = 200
+
+[budget]
+count = "total"
+tokens_per_problem = 64000
+
+[models.base]
+provider = "openai"
+model = "gpt-6-luna"
+params = { reasoning_effort = "none" }
+concurrency = 24
+
+[model_assignments.homogeneous]
+models = ["base"]
+
+[run]
+trial_concurrency = 32
+max_spend_usd = 4.0

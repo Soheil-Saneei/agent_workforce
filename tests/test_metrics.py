@@ -210,3 +210,11 @@ def test_benchmark_metric_means():
     a["team"]["metrics"], b["team"]["metrics"] = {"em": 1.0, "f1": 1.0}, {"em": 0.0, "f1": 0.5}
     (row,) = benchmark_metric_rows([a, b])
     assert row["em"] == 0.5 and row["f1"] == 0.75
+
+
+def test_item_estimates_do_not_depend_on_trial_order():
+    from workforce.analysis.metrics import item_estimate
+
+    values = {f"item{i}": float(i % 3 == 0) for i in range(30)}
+    shuffled = dict(reversed(list(values.items())))
+    assert item_estimate(values) == item_estimate(shuffled)

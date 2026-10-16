@@ -141,13 +141,16 @@ def test_max_steps_bounds_a_trajectory(tmp_path):
 
 
 def test_requests_do_not_depend_on_the_horizon(tmp_path):
-    short = Harness(solo_config(budget=600, checkpoints=(200, 600)), tmp_path, name="short")
-    long = Harness(solo_config(budget=1200, checkpoints=(200, 600, 1200)), tmp_path, name="long")
+    short = Harness(solo_config(budget=600, checkpoints=(200, 400, 600)), tmp_path, name="short")
+    long = Harness(
+        solo_config(budget=1200, checkpoints=(200, 400, 600, 1200)), tmp_path, name="long"
+    )
     short_record, long_record = short.trial(), long.trial()
     a, b = short.provider.requests, long.provider.requests
     assert 0 < len(a) < len(b)
     assert [r.to_dict() for r in a] == [r.to_dict() for r in b[: len(a)]]
-    # So the state at a shared checkpoint is the same, whatever the horizon.
+    # So checkpoints below the shorter horizon hold the same state, whatever the horizon. (The
+    # horizon checkpoint itself may lack a last step the conservative start rule skipped.)
     for index in (0, 1):
         assert (
             short_record["solo"]["checkpoints"][index] == long_record["solo"]["checkpoints"][index]

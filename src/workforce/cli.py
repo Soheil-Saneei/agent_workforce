@@ -125,7 +125,15 @@ def cmd_grid(args: argparse.Namespace) -> int:
 def cmd_plot_solo(args: argparse.Namespace) -> int:
     from workforce.analysis.plot import plot_solo_curves
 
-    trials = [t for run in args.run_dirs for t in RunStore.open(Path(run)).trials()]
+    # A later run replaces an earlier one's trials of the same benchmark and condition, so an
+    # extended run (for example to a longer horizon) can be plotted beside the original.
+    groups: dict[tuple[str, str], list[dict]] = {}
+    for run in args.run_dirs:
+        fresh: dict[tuple[str, str], list[dict]] = {}
+        for trial in RunStore.open(Path(run)).trials():
+            fresh.setdefault((trial["benchmark"], trial["condition"]["id"]), []).append(trial)
+        groups.update(fresh)
+    trials = [t for group in groups.values() for t in group]
     try:
         print(plot_solo_curves(trials, Path(args.out)))
     except ModuleNotFoundError as exc:
@@ -180,7 +188,11 @@ def build_parser() -> argparse.ArgumentParser:
     grid.set_defaults(func=cmd_grid)
 
     plot = sub.add_parser("plot-solo", help="plot solo accuracy vs tokens (PNG)")
-    plot.add_argument("run_dirs", nargs="+", help="runs whose solo trials to plot together")
+    plot.add_argument(
+        "run_dirs",
+        nargs="+",
+        help="runs to plot together; a later run replaces an earlier one's benchmark/condition",
+    )
     plot.add_argument("--out", required=True, help="output .png path")
     plot.set_defaults(func=cmd_plot_solo)
 

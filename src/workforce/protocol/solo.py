@@ -23,11 +23,15 @@ Trajectory
 Prefix invariance
 -----------------
 A step's request (messages, seed, output ceiling) depends only on the trajectory so far and the
-step index, never on the horizon or the checkpoints. So the state held at ``c`` is exactly what
-a trajectory stopped at ``c`` would hold, one trajectory yields the whole accuracy-vs-tokens
-curve, and a protocol that continues from ``SoloState.at(c)`` re-issues byte-identical requests
-for the shared prefix. Calls are keyed by the trajectory (benchmark, item, replication, agent),
-not by the experiment condition, so the gateway serves that prefix from its log.
+step index, never on the horizon or the checkpoints. Trajectories with different horizons are
+therefore identical as far as the shorter one goes, so one trajectory yields the whole
+accuracy-vs-tokens curve, and a protocol that continues from ``SoloState.at(c)`` re-issues
+byte-identical requests for the shared prefix. Calls are keyed by the trajectory (benchmark,
+item, replication, agent), not by the experiment condition, so the gateway serves that prefix
+from its log. One edge: because a step starts only if its padded input estimate plus
+``min_output_tokens`` fits, the checkpoint at the horizon itself can miss a last step that
+would have finished within a few hundred tokens of it. Checkpoints further below the horizon
+do not depend on it.
 """
 
 from __future__ import annotations

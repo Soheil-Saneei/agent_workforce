@@ -58,7 +58,8 @@ def per_item(trials: Iterable[Trial], value: Callable[[Trial], float | None]) ->
 
 
 def item_estimate(item_values: dict[str, float]) -> dict[str, Any]:
-    values = list(item_values.values())
+    # Items in a fixed order, so the bootstrap does not depend on the order trials were logged.
+    values = [item_values[item] for item in sorted(item_values)]
     return {"mean": mean(values), "ci": bootstrap_ci(values), "n_items": len(values)}
 
 

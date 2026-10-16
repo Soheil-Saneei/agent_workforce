@@ -5,9 +5,10 @@ do teams of LLM agents beat single agents, and does the effect come from **team 
 **procedural (cognitive) diversity** or **communication**, when the whole team shares a
 **fixed total token budget** per problem?
 
-The harness runs declarative factorial experiments on MuSiQue, MuSR and HumanEval, logs every
-model call, resumes interrupted runs without paying twice, and regenerates all results tables
-from the logs.
+The harness runs declarative factorial experiments on MuSiQue, MuSR and HumanEval (plus AIME and
+LiveCodeBench as harder candidates), logs every model call, resumes interrupted runs without
+paying twice, and regenerates all results tables from the logs. A solo-iteration mode measures
+how one agent's accuracy grows with the tokens it spends alone.
 
 - [Setup](#setup)
 - [Running experiments](#running-experiments)
@@ -18,6 +19,7 @@ from the logs.
 - [Adding a provider or a benchmark](#adding-a-provider-or-a-benchmark)
 - [Pilot](#pilot)
 - [Cost estimate for the full first experiment](#cost-estimate-for-the-full-first-experiment)
+- [Solo-scaling calibration](#solo-scaling-calibration)
 - [Known limitations](#known-limitations)
 
 ## Setup
@@ -26,9 +28,12 @@ Requires Python 3.11+ and [uv](https://docs.astral.sh/uv/).
 
 ```sh
 uv sync                     # creates .venv with the two runtime deps (httpx, tiktoken)
-uv run pytest               # fully offline, ~5 s
+uv run pytest               # fully offline, ~10 s
 uv run ruff check
 ```
+
+`plot-solo` draws charts with matplotlib, an optional extra (`uv sync --extra plot`; the dev
+environment already has it).
 
 API keys are read from the environment or from an env file, never from configs. The OpenAI
 adapter accepts `OPENAI_API_KEY` or `OpenAI_API_Key`. The env file is chosen by `--env-file`,
@@ -39,8 +44,11 @@ Benchmarks download on first use from pinned revisions with SHA-256 checks, into
 `$WORKFORCE_DATA_DIR` (default `~/.cache/workforce/datasets`). Nothing is committed.
 
 ```sh
-uv run workforce fetch-data musique musr humaneval
+uv run workforce fetch-data musique musr humaneval aime livecodebench
 ```
+
+AIME comes from MathArena's AIME 2025 and 2026 sets, fetched as JSON rows from the Hugging Face
+dataset viewer and pinned by checksum. LiveCodeBench is release v6 (`test6.jsonl`, 134 MB).
 
 ## Running experiments
 
@@ -53,6 +61,7 @@ uv run workforce resume runs/pilot-20261004-120000          # continue after int
 uv run workforce summarize runs/pilot-20261004-120000       # rewrite summary.md / conditions.csv
 uv run workforce summarize runs/... --rebuild               # re-derive trials from the call log, offline
 uv run workforce estimate-cost --config configs/first-experiment.toml --from-run runs/pilot-...
+uv run workforce plot-solo runs/solo-calibration-... --out solo-curves.png  # accuracy vs tokens
 ```
 
 `run` options: `--mock` (swap every model for the offline mock), `--items N` (override items
@@ -89,14 +98,15 @@ name = "pilot"
 seed = 20261004              # all seeds (calls, reveal order, tie-breaks) derive from this
 replications = 1
 
-[benchmarks.musique]         # musique | musr | humaneval | toy_arithmetic
+[benchmarks.musique]         # musique | musr | humaneval | aime | livecodebench | toy_arithmetic
 items = 20                   # omit for the whole benchmark
 budget_tokens = 100000       # total team tokens per problem (see below)
 
 [factors]
 team_size = [1, 3, 5]
 diversity = ["identical", "moderate"]            # also "strong", or your own levels
-communication = ["independent", "horizontal-2r"] # "horizontal" = 1 round, "horizontal-<k>r"
+communication = ["independent", "horizontal-2r"] # "horizontal" = 1 round, "horizontal-<k>r",
+                                                 # "solo" = solo iteration (N = 1 only)
 model_assignment = ["homogeneous"]
 
 [generation]                 # held constant across all conditions
@@ -122,6 +132,10 @@ models = ["base"]            # agents cycle through this list
 trial_concurrency = 12
 max_spend_usd = 14.0
 include_degenerate = false
+
+[solo]                       # only used by communication = "solo"
+checkpoints = [1000, 2000, 4000, 8000, 16000, 32000]  # <= each benchmark's budget_tokens
+max_steps = 64
 ```
 
 Diversity levels and procedures are data too. Defaults live in
@@ -141,8 +155,9 @@ Example configs: [`pilot.toml`](configs/pilot.toml) (the pilot),
 [`first-experiment.toml`](configs/first-experiment.toml) (the doc's first experiment at full
 scale), [`full-factorial.toml`](configs/full-factorial.toml) (the doc's 3 x 3 x 2 grid with strong
 diversity), [`mixed-models.example.toml`](configs/mixed-models.example.toml) (model assignment
-as a factor, including a local OpenAI-compatible endpoint), and
-[`smoke-mock.toml`](configs/smoke-mock.toml) (offline).
+as a factor, including a local OpenAI-compatible endpoint),
+[`solo-calibration.toml`](configs/solo-calibration.toml) (solo accuracy vs tokens on five
+benchmarks), and [`smoke-mock.toml`](configs/smoke-mock.toml) (offline).
 
 ## How the protocol and budget work
 
@@ -181,6 +196,26 @@ dropped from the end. The team then still answers and votes independently. Each 
 the plan per phase, every call's allowance, input estimate, actual usage and finish reason,
 whether any agent was cut off or skipped (`any_agent_hit_limit`), and any overrun (possible
 only if the input estimate was low).
+
+**Solo iteration** ([`protocol/solo.py`](src/workforce/protocol/solo.py),
+`communication = "solo"`). One agent writes an initial solution, then repeatedly appends a
+self-check to its own conversation: re-solve independently and compare, audit step by step, or
+test the strongest alternative, rotating by step. It keeps its answer unless the check finds a
+concrete mistake, and every prompt asks it to commit to an answer. Each step is charged as the
+budget charges a call, and a step starts only if its input plus `min_output_tokens` still fits
+within `budget_tokens` (the last step may finish past it and is logged, but counts toward
+nothing). The answer held at checkpoint `c` is the latest parsable answer from a step that
+finished within `c` tokens, so one trajectory yields the whole accuracy-vs-tokens curve. No
+request depends on the horizon or the checkpoints (the per-step output ceiling is fixed), so
+runs with different horizons agree step for step. Calls are keyed by the trajectory
+(benchmark, item, replication, agent) rather than the condition, so a later protocol that
+continues from a checkpoint state (`SoloState.at(c)`), for example team discussion after T solo
+tokens, re-issues the shared prefix from the call log at no cost. The one edge is the horizon
+checkpoint itself: the conservative start rule can skip a last step that would have finished
+within a few hundred tokens of the horizon (2 of 320 trajectories in the 64k extension below,
+no answer changed). Trial records keep the team schema
+(one phase per step) and add a `solo` section with the checkpoints. `summarize` then adds solo
+tables and `solo_checkpoints.csv`.
 
 ## Design decisions where the doc was ambiguous
 
@@ -263,6 +298,7 @@ estimate.
 | Overlap in cited evidence | process table | MuSiQue: mean pairwise Jaccard of cited paragraphs |
 | Benchmark metrics of the team answer | metrics table | MuSiQue EM, F1, support P/R/F1; HumanEval pass; MuSR accuracy |
 | Budget hits, skipped calls, overruns, parse failures, untagged answers, tie-break rate | outcomes table / CSV | |
+| Solo: accuracy, abstention, tokens used, steps at each checkpoint; gains vs previous checkpoint and vs the first answer; wrong->right / right->wrong revisions | solo tables, `solo_checkpoints.csv` | solo conditions only |
 
 **Deferred** (not computed yet, with reasons):
 
@@ -381,8 +417,8 @@ numbers validate the pipeline and size the full experiment. They are not finding
 | musique | n1-ident-disc2 | 0.40 [0.20, 0.60] | 0.60 | 0.60 | 8,701 + 282 | 0.0003 | 0.445 | 5.4 |
 | musique | n3-ident-indep | 0.50 [0.30, 0.70] | 0.52 | 0.65 | 7,894 + 97 | 0.0001 | 0.626 | 1.3 |
 | musique | n3-ident-disc2 | 0.40 [0.20, 0.60] | 0.45 | 0.55 | 27,652 + 904 | 0.0012 | 0.140 | 6.2 |
-| musique | n3-mod-indep | 0.35 [0.15, 0.60] | 0.45 | 0.65 | 7,966 + 311 | 0.0009 | 0.423 | 2.1 |
-| musique | n3-mod-disc2 | 0.35 [0.15, 0.60] | 0.48 | 0.65 | 29,525 + 1,267 | 0.0020 | 0.114 | 6.7 |
+| musique | n3-mod-indep | 0.35 [0.15, 0.55] | 0.45 | 0.65 | 7,966 + 311 | 0.0009 | 0.423 | 2.1 |
+| musique | n3-mod-disc2 | 0.35 [0.15, 0.55] | 0.48 | 0.65 | 29,525 + 1,267 | 0.0020 | 0.114 | 6.7 |
 | musique | n5-ident-indep | 0.55 [0.35, 0.75] | 0.54 | 0.65 | 13,157 + 163 | 0.0002 | 0.413 | 1.3 |
 | musique | n5-ident-disc2 | 0.40 [0.20, 0.60] | 0.50 | 0.60 | 48,333 + 1,534 | 0.0021 | 0.080 | 6.6 |
 | musique | n5-mod-indep | 0.50 [0.30, 0.70] | 0.49 | 0.70 | 13,277 + 502 | 0.0004 | 0.363 | 2.1 |
@@ -394,7 +430,7 @@ numbers validate the pipeline and size the full experiment. They are not finding
 | musr | n3-mod-indep | 0.55 [0.35, 0.75] | 0.57 | 0.75 | 3,523 + 595 | 0.0006 | 1.335 | 3.4 |
 | musr | n3-mod-disc2 | 0.50 [0.30, 0.70] | 0.58 | 0.75 | 19,098 + 2,437 | 0.0023 | 0.232 | 11.6 |
 | musr | n5-ident-indep | 0.65 [0.45, 0.85] | 0.58 | 0.70 | 5,752 + 463 | 0.0004 | 1.046 | 2.4 |
-| musr | n5-ident-disc2 | 0.65 [0.40, 0.85] | 0.61 | 0.80 | 30,897 + 2,698 | 0.0029 | 0.193 | 10.3 |
+| musr | n5-ident-disc2 | 0.65 [0.45, 0.85] | 0.61 | 0.80 | 30,897 + 2,698 | 0.0029 | 0.193 | 10.3 |
 | musr | n5-mod-indep | 0.60 [0.40, 0.80] | 0.62 | 0.85 | 5,872 + 970 | 0.0007 | 0.877 | 3.3 |
 | musr | n5-mod-disc2 | 0.65 [0.45, 0.85] | 0.58 | 0.80 | 36,991 + 3,683 | 0.0039 | 0.160 | 11.0 |
 
@@ -567,6 +603,151 @@ sample; MuSR is stratified by domain); replications cost the same as the pilot's
 replication; prices are the 2026-10-04 list prices; Batch API discounts are not used (the
 harness calls the synchronous API).
 
+## Solo-scaling calibration
+
+The follow-up study asks after how many tokens of solo work a team should start collaborating.
+That needs benchmarks on which a single agent keeps buying accuracy with extra solo tokens over
+a meaningful range. This calibration measures it with
+[solo iteration](#how-the-protocol-and-budget-work): one agent answers, then checks and revises
+its own work until it has spent 32k tokens, and the answer it holds is scored at 1k, 2k, 4k, 8k,
+16k and 32k tokens (input + output, counted as the budget counts them), so one trajectory gives
+the whole curve.
+
+**Setup** ([`configs/solo-calibration.toml`](configs/solo-calibration.toml)). `gpt-6-luna`,
+`reasoning_effort = "none"`, temperature 0.7, as in the pilot. 100 MuSiQue items (with
+`assert_answerable`), 99 MuSR (33 per domain), 100 HumanEval, all 60 AIME 2025-2026 problems and
+100 LiveCodeBench v6 medium/hard problems, 2 replications each: 918 trajectories, 8,064 calls,
+no failed trials. AIME and LiveCodeBench were still rising at 32k, so their trajectories were
+continued to 64k ([`configs/solo-calibration-64k.toml`](configs/solo-calibration-64k.toml)).
+All 2,500 calls up to 32k came from the copied call log and only the 1,236 later steps were
+paid. Every extended trajectory matched its 32k run call for call, a live check that solo
+requests do not depend on the horizon. Spend: **$2.45 of the $10 cap** (two 20-trajectory
+smoke runs $0.085, calibration $1.89, extension $0.48). The run directories and the figure are
+in `runs/calibration/` of the primary checkout (gitignored). The figure is also at
+[`docs/solo-calibration.png`](docs/solo-calibration.png).
+
+The first smoke run showed 2 of 20 first responses ending without an answer (an AIME problem
+declared "inconsistent", a LiveCodeBench response without code), which the self-check prompt
+then fixed. That would credit extra tokens with a gain that comes only from wording, so the
+commitment instruction was added to the first prompt too before the calibration.
+
+**Candidate benchmarks.**
+
+- **AIME 2025 + 2026** (60 problems, integer answers 0-999, exact match). MathArena's curated
+  copies (CC BY-NC-SA 4.0). Integer answers make the checker objective without a symbolic
+  equivalence test, and these are the most recent complete AIME sets. Considered and not used:
+  HMMT February 2026 (answers are expressions that need a symbolic checker) and MathArena's
+  post-cutoff arXiv sets (research-level, mixed answer formats).
+- **LiveCodeBench v6, medium + hard** (100 of 132 problems; LeetCode method problems and
+  AtCoder stdin programs from January-April 2025), graded on the public and hidden tests as
+  LiveCodeBench grades them. It is the newest official release and spans a real difficulty
+  range. HumanEval+ was the alternative, but it is the same 164 problems the pilot already
+  solves at 0.85-1.00, so stricter tests would add a few points of headroom at most.
+
+Both predate `gpt-6-luna`'s May 2026 knowledge cutoff (no official post-cutoff set with an
+objective checker exists for either). The AIME 2025 and 2026 halves behave alike (0.55 and 0.52
+at 32k), so there is no sign that the older set is recalled more.
+
+![Solo accuracy vs tokens per benchmark](docs/solo-calibration.png)
+
+**Accuracy at each checkpoint** (95% bootstrap CI over items). A trajectory with no finished
+step counts as wrong. MuSiQue's paragraphs alone take about 2.7k tokens to read, so its 1k and
+2k checkpoints are mechanically empty. 64k comes from the extension.
+
+| Benchmark | 1k | 2k | 4k | 8k | 16k | 32k | 64k |
+|---|---|---|---|---|---|---|---|
+| MuSiQue | 0.00 | 0.05 [0.01, 0.10] | 0.55 [0.46, 0.64] | 0.56 [0.46, 0.66] | 0.56 [0.46, 0.65] | 0.54 [0.44, 0.64] | - |
+| MuSR | 0.15 [0.10, 0.22] | 0.61 [0.52, 0.70] | 0.63 [0.54, 0.72] | 0.65 [0.56, 0.73] | 0.66 [0.57, 0.75] | 0.65 [0.56, 0.74] | - |
+| HumanEval | 0.92 [0.87, 0.95] | 0.98 [0.96, 1.00] | 0.99 [0.97, 1.00] | 0.99 [0.97, 1.00] | 0.99 [0.97, 1.00] | 0.99 [0.97, 1.00] | - |
+| AIME | 0.33 [0.23, 0.43] | 0.35 [0.25, 0.46] | 0.39 [0.28, 0.51] | 0.45 [0.34, 0.57] | 0.52 [0.40, 0.64] | 0.53 [0.42, 0.65] | 0.53 [0.42, 0.65] |
+| LiveCodeBench | 0.12 [0.06, 0.17] | 0.36 [0.28, 0.45] | 0.45 [0.35, 0.54] | 0.47 [0.38, 0.56] | 0.49 [0.41, 0.58] | 0.54 [0.45, 0.64] | 0.55 [0.46, 0.64] |
+| - hard (67) | 0.01 | 0.24 | 0.27 | 0.30 | 0.34 | 0.40 | 0.42 |
+| - medium (33) | 0.32 | 0.62 | 0.80 | 0.82 | 0.82 | 0.82 | 0.82 |
+
+**Tokens, abstention and revisions.** Mean tokens actually used is the spend of the state held
+at each checkpoint. Abstention is the share of held answers that are non-answers (no parsable
+answer, or MuSiQue's "not stated" and similar). Revisions count changes of the held answer
+between steps; changes from no answer to an answer are not counted.
+
+| Benchmark | Mean tokens used at 1k / 2k / 4k / 8k / 16k / 32k | Steps by 32k | Output tokens by 32k | Abstention, first answer -> 32k | Revisions wrong->right / right->wrong |
+|---|---|---|---|---|---|
+| MuSiQue | 0 / 108 / 2,693 / 6,169 / 13,980 / 29,109 | 7.4 | 980 | 0.06 -> 0.14 | 1 / 8 |
+| MuSR | 229 / 1,216 / 3,027 / 6,576 / 14,406 / 29,460 | 10.2 | 1,572 | 0.00 -> 0.00 | 37 / 29 |
+| HumanEval | 506 / 1,393 / 2,972 / 6,671 / 14,210 / 29,178 | 10.4 | 2,707 | 0.04 -> 0.00 | 10 / 2 |
+| AIME | 547 / 1,269 / 2,981 / 6,502 / 14,006 / 28,884 | 9.0 | 3,546 | 0.10 -> 0.00 | 31 / 8 |
+| LiveCodeBench | 176 / 1,113 / 2,734 / 6,219 / 13,561 / 28,270 | 7.0 | 4,669 | 0.10 -> 0.01 | 29 / 5 |
+
+**Verdicts.** "First answer" is the trajectory's step-0 answer, whenever it finished. Gains are
+paired over items. The "answered first" column excludes trajectories whose first response had
+no answer, so it isolates revision from mere recovery. The plateau is the first checkpoint
+within 0.02 of the best one.
+
+| Benchmark | First answer | 32k | 32k - first answer | Same, answered first | Plateau | Verdict |
+|---|---|---|---|---|---|---|
+| MuSiQue | 0.57 [0.47, 0.66] | 0.54 | -0.04 [-0.06, -0.01] | -0.04 [-0.06, -0.01] | at the first answer (4k) | **drop** |
+| MuSR | 0.61 [0.52, 0.70] | 0.65 | +0.04 [-0.02, +0.10] | +0.04 [-0.02, +0.10] | 8k | **drop** |
+| HumanEval | 0.92 [0.87, 0.95] | 0.99 | +0.07 [+0.04, +0.12] | +0.04 [+0.01, +0.09] | 2k (ceiling) | **drop** |
+| AIME | 0.34 [0.24, 0.45] | 0.53 | +0.19 [+0.12, +0.28] | +0.17 [+0.09, +0.26] | 16k | **keep** |
+| LiveCodeBench | 0.37 [0.28, 0.46] | 0.54 | +0.17 [+0.11, +0.23] | +0.11 [+0.06, +0.17] | 32k | **keep** (hard problems) |
+
+- **AIME: keep.** Accuracy climbs over three doublings: 4k to 8k +0.06 [+0.02, +0.11], 8k to
+  16k +0.07 [+0.03, +0.11]. It then flattens: 16k to 64k +0.02 [-0.03, +0.06]. Revisions fix 31
+  answers and break 8. That gives an onset range of about 2k-16k solo tokens per agent with a
+  clear plateau after it. The set is small (60 problems, about +-0.11 per checkpoint), so
+  adding AIME 2024 would tighten it at some contamination risk.
+- **LiveCodeBench: keep, weighted to hard problems.** It rises through 32k (16k to 32k +0.04
+  [+0.01, +0.08]) and is flat after (32k to 64k +0.01 [-0.01, +0.03]). Revisions fix 29 and break
+  5. Hard problems carry the range: 0.24 at 2k to 0.40 at 32k, +0.16 [+0.09, +0.22] over the
+  first answer, with LeetCode hard going from 0.33 at 2k to 0.73 at 32k. Medium problems saturate by 4k
+  (0.80-0.82).
+- **MuSiQue: drop.** After the first answer, accuracy is flat, then declines (-0.04 by 32k).
+  Extra solo work mostly turns answers into abstentions: of the 7 trajectories that lost a
+  correct first answer, 6 ended on "Not stated" or "Cannot be determined". Abstentions grow from
+  5.5% to 14% even though the prompt says every question is answerable and every self-check asks
+  for a committed answer. Answer F1 stays at 0.66-0.69. This is the pilot's abstention drift,
+  milder than under two-round self-revision (0.60 to 0.40) but still present under a design
+  meant to suppress it.
+- **HumanEval: drop.** It is at ceiling: 0.92 for the first answer and 0.99 from 4k on, all of
+  the gain coming from the first self-check.
+- **MuSR: drop.** There is no reliable gain (+0.04 [-0.02, +0.10] by 32k) and a lot of churn:
+  revisions fix 37 answers and break 29. Within MuSR, team allocation does rise (0.58 to 0.71,
+  +0.14 [+0.03, +0.24] over 33 items) while murder mysteries (0.80) and object placements (0.45)
+  stay flat. Team allocation alone is a possible secondary candidate, but 33 items is too few to
+  rely on.
+
+The CIs are narrow enough for these calls: each verdict rests on a ceiling or on a paired gain
+whose CI excludes zero, except MuSR. There the CI (-0.02 to +0.10) cannot rule out a small gain,
+but such a gain is too small and noisy to anchor an onset study. Per-checkpoint accuracy on the
+kept benchmarks is still +-0.09 to +-0.12, so the onset study needs paired comparisons on the
+same items.
+
+**Caveats.**
+
+- **Re-reading dominates the token count.** Every step re-reads the whole conversation, so by
+  32k only 3-17% of tokens are output (980 on MuSiQue, 4,669 on LiveCodeBench). That is how the
+  budget counts tokens, and the onset study should count them the same way. Under output-only
+  counting the same trajectories would end at 1-5k tokens.
+- **Short steps.** With `reasoning_effort = "none"` each step writes 100-700 tokens, so 32k buys
+  7-10 steps. A model with hidden reasoning would spend the same budget very differently.
+- **First answers without an answer.** Despite the instruction, 10% of AIME, 9.5% of
+  LiveCodeBench, 3.5% of HumanEval and 5.5% of MuSiQue first responses (an explicit non-answer
+  there) had no answer. The first self-check recovers nearly all of them, which is why gains are
+  also reported without them.
+- **Execution timing.** LiveCodeBench tests have a 6 s limit, so a program near it can time out
+  under load. The extension independently rescored all 2,462 answered steps of the 32k run.
+  Correctness agreed on every one; 5 behaviour keys, all from one slow program, differed.
+- **The horizon checkpoint.** In 2 of the 120 extended AIME trajectories, a last step finished
+  within 32k (at 31,957 and 31,973 tokens) that the 32k run's conservative start rule had
+  skipped. Neither changed an answer.
+
+For the follow-up, branch team discussion from `SoloState.at(T)` of shared trajectories, as the
+extension did, so that every onset point reuses the same solo prefix from the call log.
+
+```sh
+uv run workforce run configs/solo-calibration.toml --env-file /path/to/.env
+uv run workforce plot-solo runs/solo-calibration-... runs/solo-64k --out solo-calibration.png
+```
+
 ## Known limitations
 
 - **Budget as a cap.** Small teams leave most of their budget unused, so "fixed budget"
@@ -598,5 +779,8 @@ harness calls the synchronous API).
 - **Scale.** A run is one process with asyncio concurrency. `calls.jsonl` stores full
   prompts per call (11 KB each in the pilot): about 3.5 GB of call logs plus 0.8 GB of
   trial records for the full first experiment.
+- **LiveCodeBench run size.** A run stores its items, and LiveCodeBench items carry their
+  hidden tests (compressed, about 1 MB per problem), so `items/livecodebench.jsonl` was 100 MB
+  in the 100-problem calibration. Its `calls.jsonl` held 8,064 calls in 126 MB.
 - **Static prices.** The built-in price table is dated 2026-10-04. Override it with `price`
   in a model spec.

@@ -196,3 +196,42 @@ def test_lcb_prompts_and_parsing(lcb):
     text = "```python\nclass Solution:\n    def pair(self, a, b):\n        return []\n```"
     assert "def pair" in lcb.parse_answer(None, f"reasoning\n{text}", FUNCTIONAL_ITEM)
     assert lcb.parse_answer("", "no code", STDIN_ITEM) is None
+
+
+# Downloads ---------------------------------------------------------------------------------
+def test_fetch_retries_transient_server_errors_and_verifies_the_checksum(tmp_path, monkeypatch):
+    import hashlib
+
+    import httpx
+
+    from workforce.tasks import download
+
+    body = b'{"rows": []}'
+    remote = download.RemoteFile(
+        "https://example.invalid/rows", hashlib.sha256(body).hexdigest(), "f"
+    )
+    statuses = iter([502, 503, 200])
+
+    def flaky(url, directory):
+        status = next(statuses)
+        request = httpx.Request("GET", url)
+        if status != 200:
+            response = httpx.Response(status, request=request)
+            raise httpx.HTTPStatusError("bad gateway", request=request, response=response)
+        path = directory / "partial"
+        path.write_bytes(body)
+        return path
+
+    monkeypatch.setenv("WORKFORCE_DATA_DIR", str(tmp_path))
+    monkeypatch.setattr(download, "_download", flaky)
+    monkeypatch.setattr(download.time, "sleep", lambda _: None)
+    assert download.fetch(remote).read_bytes() == body
+
+    def forbidden(url, directory):
+        request = httpx.Request("GET", url)
+        response = httpx.Response(404, request=request)
+        raise httpx.HTTPStatusError("missing", request=request, response=response)
+
+    monkeypatch.setattr(download, "_download", forbidden)
+    with pytest.raises(httpx.HTTPStatusError):  # not transient: no retry
+        download.fetch(download.RemoteFile(remote.url, "0" * 64, "g"))

@@ -28,15 +28,19 @@ def _label(tokens: int) -> str:
 
 
 def plot_solo_curves(trials: Sequence[dict[str, Any]], out: Path) -> Path:
-    """One panel per benchmark: accuracy (95% bootstrap CI band) at each token checkpoint,
-    one line per condition. Checkpoints that not every trajectory reached are hollow."""
+    """One panel per benchmark: accuracy (95% bootstrap CI band) at each token checkpoint, one
+    line per condition. A checkpoint is hollow when some trajectory had not finished a step."""
     import matplotlib
 
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
 
     rows = checkpoint_rows(trials)
-    benchmarks = sorted({r["benchmark"] for r in rows})
+    order = list(DISPLAY_NAMES)
+    benchmarks = sorted(
+        {r["benchmark"] for r in rows},
+        key=lambda b: (order.index(b) if b in order else len(order), b),
+    )
     conditions = sorted({r["condition"] for r in rows})
     if not benchmarks:
         raise ValueError("no solo trials to plot")
@@ -99,9 +103,10 @@ def plot_solo_curves(trials: Sequence[dict[str, Any]], out: Path) -> Path:
         ax.tick_params(colors=MUTED, labelsize=9, length=0)
     for ax in axes[:, 0]:
         ax.set_ylabel("accuracy", color=MUTED, fontsize=9)
-    total = rows and next(t for t in trials if "solo" in t)["solo"]["count"] == "total"
-    for ax in axes[-1, :]:
-        ax.set_xlabel(
+    total = next(t for t in trials if "solo" in t)["solo"]["count"] == "total"
+    for column in range(columns):
+        visible = [ax for ax in axes[:, column] if ax.get_visible()]
+        visible[-1].set_xlabel(
             "tokens spent (input + output)" if total else "output tokens spent",
             color=MUTED,
             fontsize=9,
@@ -109,8 +114,8 @@ def plot_solo_curves(trials: Sequence[dict[str, Any]], out: Path) -> Path:
     if len(conditions) > 1:
         fig.legend(*axes.flat[0].get_legend_handles_labels(), loc="lower right", frameon=False)
     caption = textwrap.fill(
-        "Band: 95% bootstrap CI over items. Hollow marker: some trajectories had no answer "
-        "yet at that checkpoint (counted as wrong).",
+        "Band: 95% bootstrap CI over items. Hollow: some trajectories had not finished a step "
+        "yet (no answer counts as wrong).",
         width=int(11 * 4.2 * columns),
     )
     fig.suptitle(

@@ -14,6 +14,9 @@ for design decisions, config format, metrics and limitations; the study design i
   (offline replay) instead of re-running.
 - `src/workforce/protocol/mock_agent.py` parses the prompt shapes from `protocol/prompts.py`
   and the task prompts; keep it in sync when changing prompt markers.
+- Solo iteration (`protocol/solo.py`) relies on prefix invariance: a step's request must not
+  depend on the horizon or the checkpoints (fixed output ceiling, no budget in prompts), so one
+  trajectory yields every checkpoint and continuing from `SoloState.at(c)` replays from cache.
 - Test helpers: `tests/conftest.py` (`make_config`, `run_experiment`) and `tests/helpers.py`
   (`run_trial`, `agent_seed_map`).
 
